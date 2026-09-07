@@ -62,3 +62,27 @@ def test_command_config_rejects_non_loopback() -> None:
     import pytest
     with pytest.raises(ValueError, match="loopback"):
         YoloCommandConfig("0.0.0.0", 5006, True)
+
+
+def test_client_submits_virtual_nadir_reset() -> None:
+    receiver = CommandReceiver("127.0.0.1", 0, process_session_id="yolo-A")
+    host, port = receiver.sock.getsockname()
+    stop = threading.Event()
+
+    def serve() -> None:
+        while not stop.is_set():
+            for command in receiver.poll():
+                receiver.complete(command, applied=True, locked_track_id=None,
+                                  recording_state="IDLE", reason_code="virtual_nadir_reset")
+            stop.wait(0.001)
+
+    thread = threading.Thread(target=serve); thread.start()
+    try:
+        client = YoloCommandClient(YoloCommandConfig(host, port, True, 0.1, 1000, 0),
+                                   lambda: "yolo-A")
+        status = client.reset_virtual_nadir()
+        assert status.state is VisionResultState.APPLIED
+        assert status.reason_code == "virtual_nadir_reset"
+    finally:
+        stop.set(); thread.join(1); receiver.close()
+    assert not thread.is_alive()

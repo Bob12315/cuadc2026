@@ -66,6 +66,12 @@
     return result;
   }
 
+  async function resetVirtualNadir() {
+    var result = await _api()("/api/virtual-nadir/reset", {method: "POST", body: "{}"});
+    _setHint(result.message || (result.ok ? "虚拟云台方向已重置" : "虚拟云台方向重置失败"));
+    return result;
+  }
+
   // Click video target lock
   function clickVideo(event) {
     var st = _state();
@@ -117,6 +123,17 @@
         });
       };
     }
+    var reset = $("virtualNadirReset");
+    if (reset) {
+      reset.onclick = function () {
+        reset.disabled = true;
+        resetVirtualNadir().catch(function (error) {
+          _setHint("虚拟云台方向重置失败: " + error.message);
+        }).finally(function () {
+          reset.disabled = false;
+        });
+      };
+    }
     refreshCameraRecordingStatus().catch(function (err) {
       console.warn("camera recording init status failed", err);
     });
@@ -127,6 +144,7 @@
     getLatestCameraRecording: getLatestCameraRecording,
     refreshCameraRecordingStatus: refreshCameraRecordingStatus,
     toggleCameraRecording: toggleCameraRecording,
+    resetVirtualNadir: resetVirtualNadir,
     renderCameraRecordingStatus: renderCameraRecordingStatus,
     clickVideo: clickVideo,
     setupVideoPanel: setupVideoPanel,

@@ -128,6 +128,7 @@ def main() -> int:
                 raw_frame = packet.frame
                 frame = raw_frame
                 rectification = None
+                attitude = None
                 if rectifier is not None and attitude_history is not None:
                     attitude_cfg = cfg.virtual_nadir.attitude
                     attitude = attitude_history.lookup(
@@ -158,13 +159,13 @@ def main() -> int:
                 else:
                     valid_mask = None if rectification is None else rectification.valid_mask
                     ticket = tracker.submit(frame, valid_mask=valid_mask)
-                pending_frames.append((packet, raw_frame, frame, rectification, ticket))
+                pending_frames.append((packet, raw_frame, frame, rectification, ticket, attitude))
                 if invalid:
                     break
 
             if not pending_frames:
                 continue
-            packet, raw_frame, frame, rectification, ticket = pending_frames.popleft()
+            packet, raw_frame, frame, rectification, ticket, attitude = pending_frames.popleft()
             image_height, image_width = frame.shape[:2]
 
             if ticket is None:
@@ -198,7 +199,29 @@ def main() -> int:
                         error=recorder_status.error or None)
                     continue
                 applied = True
-                if command.action in {"recording_start", "recording_stop"}:
+                reset_reason = None
+                if command.action == "reset_virtual_nadir":
+                    if rectifier is None or attitude is None:
+                        applied = False
+                        reset_reason = "virtual_nadir_unavailable"
+                    elif not rectifier.reset_yaw_reference(attitude):
+                        applied = False
+                        reset_reason = "virtual_nadir_attitude_invalid"
+                    else:
+                        # Old-reference detections must never appear after a
+                        # successful reset.  Only a newly rectified frame may
+                        # establish a subsequent target lock.
+                        for pending in pending_frames:
+                            pending_ticket = pending[4]
+                            if pending_ticket is not None:
+                                tracker.cancel(pending_ticket)
+                        pending_frames.clear()
+                        tracker.reset()
+                        target_manager.invalidate()
+                        tracks = []
+                        inference_metrics = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
+                        reset_reason = "virtual_nadir_reset"
+                elif command.action in {"recording_start", "recording_stop"}:
                     raw_recorder.handle_command(command.action, raw_frame.shape)
                 else:
                     applied = target_manager.apply_command(command, tracks)
@@ -214,6 +237,7 @@ def main() -> int:
                     actual_path=recorder_status.path or None,
                     frames=recorder_status.frames,
                     error=recorder_status.error or None,
+                    reason_code=reset_reason,
                 )
 
             current_target = target_manager.update(

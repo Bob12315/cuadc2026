@@ -40,6 +40,12 @@ def build_router(ctx: WebContext) -> APIRouter:
         return {"ok": result.ok, "message": result.message,
                 "recording": control.recording_status()}
 
+    @router.post("/virtual-nadir/reset")
+    def reset_virtual_nadir():
+        result = control.reset_virtual_nadir()
+        ctx.audit.append("VIRTUAL_NADIR", "reset_reference", result.ok, result.message)
+        return {"ok": result.ok, "message": result.message}
+
     @router.post("/yolo/target/{action}")
     def target(action: str, track_id: int | None = None):
         commands = {"unlock": "target unlock", "next": "target next", "prev": "target prev"}

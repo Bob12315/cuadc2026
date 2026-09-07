@@ -24,6 +24,7 @@ class CommandReceiver:
     {"action": "lock_target", "track_id": 7}
     {"action": "recording_start"}
     {"action": "recording_stop"}
+    {"action": "reset_virtual_nadir"}
     """
 
     def __init__(self, ip: str, port: int, enabled: bool = True,
@@ -86,6 +87,7 @@ class CommandReceiver:
                 "unlock_target",
                 "recording_start",
                 "recording_stop",
+                "reset_virtual_nadir",
             }:
                 continue
             self._last_sequence = sequence
@@ -153,6 +155,12 @@ class CommandReceiver:
         if kind == "set_recording" and isinstance(body.get("enabled"), bool):
             message = CommandMessage("recording_start" if body["enabled"] else "recording_stop", None,
                                      command_id, client_id, client_session, addr, True,
+                                     received_at_ns + ttl_ms * 1_000_000)
+            self._claim(key, message, fingerprint, received_at_ns, ttl_ms)
+            return message
+        if kind == "reset_virtual_nadir":
+            message = CommandMessage("reset_virtual_nadir", None, command_id,
+                                     client_id, client_session, addr, True,
                                      received_at_ns + ttl_ms * 1_000_000)
             self._claim(key, message, fingerprint, received_at_ns, ttl_ms)
             return message

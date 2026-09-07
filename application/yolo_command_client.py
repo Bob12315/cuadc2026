@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from contracts.platform.perception import (
-    RecordingState, SetRecording, SetTargetLock, VisionCommandEnvelope,
+    RecordingState, ResetVirtualNadir, SetRecording, SetTargetLock, VisionCommandEnvelope,
     VisionCommandStatus, VisionResultState, VisionSubmissionReceipt,
 )
 from contracts.platform.common import ClockStamp, SchemaVersion
@@ -83,8 +83,10 @@ class YoloCommandClient:
         local_started_at_monotonic_ns = time.monotonic_ns()
         command = envelope.command
         body = {"kind": command.kind}
-        if isinstance(command, SetTargetLock): body["track_id"] = command.track_id
-        else: body["enabled"] = command.enabled
+        if isinstance(command, SetTargetLock):
+            body["track_id"] = command.track_id
+        elif isinstance(command, SetRecording):
+            body["enabled"] = command.enabled
         payload = {
             "schema_major": 2, "schema_minor": 0, "message_type": "command",
             "sequence": envelope.sequence, "ttl_ms": envelope.ttl_ms,
@@ -150,7 +152,12 @@ class YoloCommandClient:
         session = self._session_provider()
         return self._submit_typed(SetRecording(False), session) if session else self.send("recording_stop")
 
-    def _submit_typed(self, command: SetTargetLock | SetRecording,
+    def reset_virtual_nadir(self) -> VisionCommandStatus:
+        session = self._session_provider()
+        return (self._submit_typed(ResetVirtualNadir(), session) if session
+                else self.send("reset_virtual_nadir"))
+
+    def _submit_typed(self, command: SetTargetLock | SetRecording | ResetVirtualNadir,
                       target_session: str) -> VisionCommandStatus:
         envelope = VisionCommandEnvelope(
             SchemaVersion(2, 0), self.client_id, self.client_session_id,

@@ -85,7 +85,14 @@ class SetRecording:
     kind: Literal["set_recording"] = "set_recording"
 
 
-VisionCommand: TypeAlias = SetTargetLock | SetRecording
+@dataclass(frozen=True, slots=True)
+class ResetVirtualNadir:
+    """Set the virtual-nadir yaw reference to the next verified attitude sample."""
+
+    kind: Literal["reset_virtual_nadir"] = "reset_virtual_nadir"
+
+
+VisionCommand: TypeAlias = SetTargetLock | SetRecording | ResetVirtualNadir
 
 
 @dataclass(frozen=True, slots=True)

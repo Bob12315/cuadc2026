@@ -105,6 +105,22 @@ class SystemControlService:
         self._record_event("OK", result.message)
         return result
 
+    def reset_virtual_nadir(self) -> OperationResult:
+        # The reference change invalidates every image-domain target.  Revoke
+        # the current Action authorization before requesting the reset so an
+        # active visual action cannot continue on a mixed coordinate system.
+        self._revoke_and_clear("virtual_nadir_reset")
+        try:
+            status = self._yolo_client.reset_virtual_nadir()
+        except Exception as exc:
+            result = OperationResult(False, f"virtual nadir reset failed: {exc}")
+            self._record_event("ERROR", result.message)
+            return result
+        ok = status.state.value in {"ACCEPTED", "IN_PROGRESS", "APPLIED"}
+        result = OperationResult(ok, f"virtual nadir reset: {status.state.value}/{status.reason_code}; action authorization cleared")
+        self._record_event("OK" if ok else "ERROR", result.message)
+        return result
+
     def recording_status(self) -> dict[str, object]:
         snapshot = self._get_perception_snapshot()
         if snapshot is not None:

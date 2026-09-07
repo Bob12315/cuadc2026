@@ -117,6 +117,23 @@ def test_v2_unsupported_command_returns_stable_rejection() -> None:
     receiver.close()
 
 
+def test_v2_command_accepts_virtual_nadir_reset() -> None:
+    receiver = CommandReceiver("127.0.0.1", 0, process_session_id="yolo-A")
+    host, port = receiver.sock.getsockname()
+    payload = {"schema_major": 2, "message_type": "command", "client_id": "app",
+        "client_session_id": "app-1", "command_id": "reset-1", "ttl_ms": 1000,
+        "sent_at_monotonic_ns": time.monotonic_ns(), "target_yolo_process_session_id": "yolo-A",
+        "payload": {"kind": "reset_virtual_nadir"}}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.bind(("127.0.0.1", 0)); sock.settimeout(0.5)
+        sock.sendto(json.dumps(payload).encode(), (host, port))
+        commands = receiver.poll()
+        accepted = json.loads(sock.recvfrom(4096)[0])
+        assert [command.action for command in commands] == ["reset_virtual_nadir"]
+        assert accepted["state"] == "ACCEPTED"
+    receiver.close()
+
+
 def test_v2_same_command_id_with_different_payload_is_conflict() -> None:
     receiver = CommandReceiver("127.0.0.1", 0, process_session_id="yolo-A")
     host, port = receiver.sock.getsockname()

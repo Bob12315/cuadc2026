@@ -101,6 +101,24 @@ class VirtualNadirRectifier:
         self.yaw_ref_rad: float | None = None
         self.last_homography: np.ndarray | None = None
 
+    def reset_yaw_reference(self, attitude: AttitudeMatch) -> bool:
+        """Atomically establish a new reference from a verified frame attitude.
+
+        The caller must discard all detections derived from the old reference
+        before publishing another perception result.  A reference from another
+        attitude session is deliberately rejected.
+        """
+        if (
+            not attitude.valid
+            or attitude.yaw_rad is None
+            or attitude.session_key != self._session_key
+            or not math.isfinite(attitude.yaw_rad)
+        ):
+            return False
+        self.yaw_ref_rad = attitude.yaw_rad
+        self.last_homography = None
+        return True
+
     def rectify(self, frame: np.ndarray, attitude: AttitudeMatch) -> RectificationResult:
         started = time.perf_counter()
         if attitude.session_key != self._session_key:

@@ -155,6 +155,22 @@ def test_link_session_change_relocks_yaw_reference() -> None:
     assert np.allclose(rectifier.last_homography, np.eye(3), atol=1e-9)
 
 
+def test_manual_yaw_reference_reset_requires_current_valid_session() -> None:
+    rectifier = VirtualNadirRectifier(_config())
+    image = _grid()
+    first = _match(yaw=0.3, session="link-a")
+    rectifier.rectify(image, first)
+
+    reset = _match(yaw=-0.8, session="link-a")
+    assert rectifier.reset_yaw_reference(reset)
+    assert rectifier.yaw_ref_rad == pytest.approx(-0.8)
+    assert rectifier.last_homography is None
+
+    other_session = _match(yaw=0.7, session="link-b")
+    assert not rectifier.reset_yaw_reference(other_session)
+    assert rectifier.yaw_ref_rad == pytest.approx(-0.8)
+
+
 def test_invalid_attitude_does_not_reuse_previous_homography() -> None:
     rectifier = VirtualNadirRectifier(_config())
     image = _grid()
