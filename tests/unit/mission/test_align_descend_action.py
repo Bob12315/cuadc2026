@@ -145,3 +145,33 @@ def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:
     assert command.params["vx_cmd"] == 0.0
     assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
+
+
+def test_drop_timeout_can_complete_with_an_explicit_stop() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.0, "complete_on_timeout": True})
+    action.started_at -= 31.0
+
+    result = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.5, 0.5)],
+        altitude_m=2.0,
+    ))
+
+    assert result.done and not result.failed
+    assert result.reason == "alignment_timeout_accepted"
+    command = _command(result)
+    assert command.params["vx_cmd"] == 0.0
+    assert command.params["vy_cmd"] == 0.0
+    assert command.params["vz_cmd"] == 0.0
+
+
+def test_disabled_alignment_completes_without_waiting() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.0, "enabled": False})
+
+    result = action.update(_context(frame_id=1, detections=[], altitude_m=2.5))
+
+    assert result.done and not result.failed
+    assert result.reason == "alignment_skipped"
+    assert _command(result).params["vz_cmd"] == 0.0

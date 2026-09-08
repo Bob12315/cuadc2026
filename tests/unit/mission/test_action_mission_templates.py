@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from missions.engine import MissionActionStep
 from missions.common.actions.action_lab import create_action_lab_registry
+from missions.engine import MissionActionStep
 from scripts.validate_action_missions import DEFAULT_TEMPLATE_PATHS, validate_templates
-
 
 ROOT = Path(__file__).parents[3]
 
@@ -120,7 +119,33 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
             assert "config" not in step["params"]
 
     releases = [step["params"] for step in steps if step["name"] == "payload_release"]
-    assert [release["servo_outputs"] for release in releases] == [
-        [{"channel": 9, "release_pwm": 1800, "hold_pwm": 1600}],
-        [{"channel": 10, "release_pwm": 1800, "hold_pwm": 1600}],
+    assert releases[0]["servo_outputs"] == "$drop_targets.first_release_servo_outputs"
+    assert releases[1]["servo_outputs"] == [
+        {"channel": 10, "release_pwm": 1800, "hold_pwm": 1600},
     ]
+
+
+def test_full_flow_plans_zero_one_or_two_target_release() -> None:
+    steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
+    by_label = {step["label"]: step for step in steps}
+    selector = by_label["select_gps_drop_targets"]["params"]
+
+    assert selector["fallback_target"] == {
+        "valid": True,
+        "id": "drop_zone_center",
+        "target_id": "drop_zone_center",
+        "x": 0,
+        "y": 32.5,
+        "status": "fallback_center",
+    }
+    assert [item["channel"] for item in selector["single_target_servo_outputs"]] == [9, 10]
+    assert [item["channel"] for item in selector["multi_target_first_servo_outputs"]] == [9]
+
+    assert by_label["drop_1_approach"]["params"]["target"] == "$drop_targets.target_slots.0"
+    assert by_label["drop_2_approach"]["params"]["target"] == "$drop_targets.target_slots.1"
+    assert by_label["drop_1_align"]["params"]["enabled"] == "$drop_targets.first_alignment_enabled"
+    assert by_label["drop_2_align"]["params"]["enabled"] == "$drop_targets.second_alignment_enabled"
+    assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"
+    assert by_label["drop_1_align"]["params"]["complete_on_timeout"] is True
+    assert by_label["drop_2_align"]["params"]["complete_on_timeout"] is True
+    assert by_label["final_land_align"]["params"]["complete_on_timeout"] is False

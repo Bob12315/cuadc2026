@@ -24,6 +24,10 @@ class AlignDescendAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
+        self.enabled = self._boolean(data.get("enabled", True), "enabled")
+        self.complete_on_timeout = self._boolean(
+            data.get("complete_on_timeout", False), "complete_on_timeout"
+        )
         self.target_altitude_m = self._positive(data.get("target_altitude_m", 1.2), "target_altitude_m")
         self.descend_speed_mps = self._non_negative(data.get("descend_speed_mps", 0.2), "descend_speed_mps")
         self.release_deadband_ex = self._positive(data.get("release_deadband_ex", 0.1), "release_deadband_ex")
@@ -52,8 +56,14 @@ class AlignDescendAction(ActionModule):
         yaw = self._desired_yaw_rad(data)
         if self.stopped:
             return self._terminal(True, "stopped", yaw_rad=yaw)
+        if not self.enabled:
+            return self._terminal(True, "alignment_skipped", yaw_rad=yaw)
         if time.monotonic() - self.started_at >= self.TIMEOUT_S:
-            return self._terminal(False, "align_descend_timeout", yaw_rad=yaw)
+            return self._terminal(
+                self.complete_on_timeout,
+                "alignment_timeout_accepted" if self.complete_on_timeout else "align_descend_timeout",
+                yaw_rad=yaw,
+            )
 
         scene = data.get("scene")
         target = self._nearest_scene_target(scene)
@@ -100,6 +110,8 @@ class AlignDescendAction(ActionModule):
     def reset(self) -> None:
         self.started = False
         self.stopped = False
+        self.enabled = True
+        self.complete_on_timeout = False
         self.target_altitude_m = 1.2
         self.descend_speed_mps = 0.2
         self.release_deadband_ex = 0.1
@@ -215,6 +227,8 @@ class AlignDescendAction(ActionModule):
     ) -> dict[str, Any]:
         return {
             "state": reason,
+            "enabled": self.enabled,
+            "complete_on_timeout": self.complete_on_timeout,
             "target_track_id": None if target is None else target.get("track_id"),
             "ex": None if target is None else target["ex"],
             "ey": None if target is None else target["ey"],
@@ -245,6 +259,12 @@ class AlignDescendAction(ActionModule):
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
+
+    @staticmethod
+    def _boolean(value: Any, name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"{name} must be a bool")
 
     @classmethod
     def _finite(cls, value: Any, name: str) -> float:

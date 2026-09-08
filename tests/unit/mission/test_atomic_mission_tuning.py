@@ -5,7 +5,6 @@ from pathlib import Path
 
 from missions.common.actions.action_lab import action_definitions, action_lab_specs
 
-
 ROOT = Path(__file__).parents[3]
 
 
@@ -26,7 +25,8 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         "release_deadband_ey", "kp_forward", "kp_right", "max_vx_mps",
         "max_vy_mps", "vx_sign", "vy_sign", "field_yaw_deg", "priority", "key",
     }
-    assert all(set(item) == allowed for item in generic + rescue)
+    assert all(set(item) == allowed for item in generic)
+    assert all(set(item) == allowed | {"enabled", "complete_on_timeout"} for item in rescue)
     for item in generic:
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.24
@@ -34,6 +34,7 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         assert (item["kp_forward"], item["kp_right"]) == (0.275, 0.275)
         assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.2, 0.2)
     for item in rescue:
+        assert item["complete_on_timeout"] is True
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.30
         assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)

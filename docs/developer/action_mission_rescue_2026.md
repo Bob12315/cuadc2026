@@ -9,7 +9,8 @@
 
 1. 建立并冻结比赛 FIELD 坐标；
 2. 起飞后在投放区多视角定位目标；
-3. 选择两个有效目标，依次视觉对准并投放载荷；
+3. 按识别数量生成投放计划：零目标在投放区中心投放，一个目标对准后同时投放两枚载荷，
+   两个及以上目标选择最高分的两个并依次对准投放；
 4. 前往侦察区扫描危险标识并生成排名；
 5. 返回起飞点，执行视觉辅助降落和 LAND 兜底。
 
@@ -125,8 +126,8 @@ RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
 | 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
-| 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`。 | 暂无检测或高度不可用时发零速等待；运行达到 30 s 时发零速并失败退出。 |
-| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。 | 首 tick 为 `release_sent`，最终为 `payload_released`；`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
+| 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
+| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放同时控制 SERVO9/10；两个目标时分别控制 SERVO9、SERVO10，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
 连续的 `align_descend` 在停止、超时或丢失视觉时都会发送显式零速，
 并清除旧连续命令；这不能替代飞手或地面站接管。
@@ -134,6 +135,7 @@ RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`
 投放对准段的有效参数是：目标高度 1.2 m、下降率 0.30 m/s、对准范围
 `|ex|/|ey| ≤ 0.02`、水平 P 增益 0.3 且限幅 0.25 m/s。返航视觉下降段高度为 0.3 m，
 水平限幅及对准范围为 0.3。超时固定为 30 s，5 帧窗口和 3 帧命中数固定在 Action 中。
+只有投放对准把超时视作完成；最终返航视觉对准显式设置为超时失败。
 
 ## 运行架构
 
@@ -169,6 +171,8 @@ gps_capture_view save_as drop_scan_view_1..4
 
 select_drop_targets save_as drop_targets
   → drop_targets.target_slots
+  → first/second alignment enabled
+  → first release SERVO outputs and second release enabled
 
 goto_waypoint（融合目标 GPS 上方）
   → align_descend
@@ -179,7 +183,10 @@ goto_waypoint（融合目标 GPS 上方）
 
 投放区融合除要求每个聚类至少 3 个有效观测外，还要求这些观测至少来自 3 个不同扫描
 航点，避免单一画面内的重复框满足融合门槛。融合输出携带的总权重会参与同类别目标的
-稳定排序。`align_descend` 不再消费目标 slot 或固定 track，只使用飞机到达位置后的当前画面。
+稳定排序。零目标时 `target_slots[0]` 是 FIELD `(0, 32.5)` 的中心回退点，飞机在 2.5 m
+高度直接同时投放两枚载荷。一个目标时第一槽使用融合 GPS，并在一次对准后同时投放两枚
+载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定 track，只使用飞机到达位置
+后的当前画面；投放计划只控制该步骤是否执行。
 
 参数引用支持字典键和列表索引，例如：
 

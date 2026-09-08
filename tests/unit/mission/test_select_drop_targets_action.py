@@ -202,6 +202,53 @@ def test_select_drop_targets_allow_fewer_accepts_zero_targets() -> None:
     assert all(slot["valid"] is False for slot in result.detail["target_slots"])
 
 
+@pytest.mark.parametrize(
+    ("objects", "expected_first_channels", "first_align", "second_align", "second_release"),
+    [
+        ([], [9, 10], False, False, False),
+        ([{"id": "b1", "class_name": "bucket", "lat": 34.0, "lon": 108.0,
+           "east_m": 1.0, "north_m": 2.0, "seen_count": 3, "raw_count": 3}],
+         [9, 10], True, False, False),
+        ([{"id": "b1", "class_name": "bucket", "lat": 34.0, "lon": 108.0,
+           "east_m": 1.0, "north_m": 2.0, "seen_count": 3, "raw_count": 3},
+          {"id": "b2", "class_name": "bucket", "lat": 34.1, "lon": 108.1,
+           "east_m": 3.0, "north_m": 4.0, "seen_count": 3, "raw_count": 3}],
+         [9], True, True, True),
+    ],
+)
+def test_competition_release_plan_handles_zero_one_or_two_targets(
+    objects, expected_first_channels, first_align, second_align, second_release
+) -> None:
+    outputs = [
+        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
+        {"channel": 10, "release_pwm": 1800, "hold_pwm": 1600},
+    ]
+    result = _select(
+        objects,
+        coordinate_mode="gps_enu",
+        target_count=2,
+        allow_fewer=True,
+        min_seen_count=3,
+        min_raw_count=3,
+        fallback_target={"x": 0.0, "y": 32.5, "target_id": "drop_zone_center"},
+        single_target_servo_outputs=outputs,
+        multi_target_first_servo_outputs=outputs[:1],
+    )
+
+    assert result.done and not result.failed
+    assert [item["channel"] for item in result.output["first_release_servo_outputs"]] == expected_first_channels
+    assert result.output["first_alignment_enabled"] is first_align
+    assert result.output["second_alignment_enabled"] is second_align
+    assert result.output["second_release_enabled"] is second_release
+    assert len(result.output["target_slots"]) == 2
+    if not objects:
+        fallback = result.output["target_slots"][0]
+        assert fallback["valid"] is True
+        assert fallback["x"] == 0.0
+        assert fallback["y"] == 32.5
+        assert fallback["status"] == "fallback_center"
+
+
 def test_select_drop_targets_allow_fewer_output_passes_action_contract() -> None:
     runner = ActionRunner(create_action_lab_registry())
     start = runner.start(

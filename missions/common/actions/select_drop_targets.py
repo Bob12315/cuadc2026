@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Any
+
 from guidance.waypoint_math import field_xy_to_enu
 
 from .base import ActionModule
 from .result import ActionResult
-
 
 DEFAULT_SCORE_TABLE = {
     "bucket_1": 500,
@@ -87,6 +87,7 @@ class SelectDropTargetsAction(ActionModule):
         self.multi_target_first_servo_outputs = self._servo_outputs(
             data.get("multi_target_first_servo_outputs"), "multi_target_first_servo_outputs"
         )
+        self.fallback_target = self._fallback_target(data.get("fallback_target"))
         self.key = str(data.get("key") or "").strip() or "select_drop_targets"
         self.zone_center = self._zone_center(data.get("zone_center"))
         self.zone_center_mode = str(data.get("zone_center_mode", "local"))
@@ -147,6 +148,7 @@ class SelectDropTargetsAction(ActionModule):
         self.prefer_class_order = list(DEFAULT_CLASS_ORDER)
         self.single_target_servo_outputs: list[dict[str, Any]] | None = None
         self.multi_target_first_servo_outputs: list[dict[str, Any]] | None = None
+        self.fallback_target: dict[str, Any] | None = None
         self.zone_center: tuple[float, float] | None = None
         self.zone_center_mode = "local"
         self.coordinate_mode = "local"
@@ -315,14 +317,15 @@ class SelectDropTargetsAction(ActionModule):
             "allow_fewer": self.allow_fewer,
             "key": self.key,
         }
-        if selected_targets:
-            outputs = (
-                self.single_target_servo_outputs
-                if len(selected_targets) == 1
-                else self.multi_target_first_servo_outputs
-            )
-            if outputs is not None:
-                detail["first_release_servo_outputs"] = [dict(item) for item in outputs]
+        outputs = (
+            self.single_target_servo_outputs
+            if len(selected_targets) <= 1
+            else self.multi_target_first_servo_outputs
+        )
+        detail["first_release_servo_outputs"] = [dict(item) for item in (outputs or [])]
+        detail["first_alignment_enabled"] = len(selected_targets) >= 1
+        detail["second_alignment_enabled"] = len(selected_targets) >= 2
+        detail["second_release_enabled"] = len(selected_targets) >= 2
         detail["target_slots"] = self._build_target_slots(selected)
         return detail
 
@@ -356,6 +359,8 @@ class SelectDropTargetsAction(ActionModule):
                 if gps_lon is not None:
                     slot["lon"] = gps_lon
                 slots.append(slot)
+            elif rank_index == 0 and not selected and self.fallback_target is not None:
+                slots.append(dict(self.fallback_target))
             else:
                 missing_target_id = (
                     f"gps_target_missing_{rank_index}"
@@ -383,6 +388,39 @@ class SelectDropTargetsAction(ActionModule):
                     "status": "missing",
                 })
         return slots
+
+    @staticmethod
+    def _fallback_target(value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise TypeError("fallback_target must be an object")
+        try:
+            field_x_m = float(value["field_x_m"] if "field_x_m" in value else value["x"])
+            field_y_m = float(value["field_y_m"] if "field_y_m" in value else value["y"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("fallback_target requires finite field x/y") from exc
+        if not math.isfinite(field_x_m) or not math.isfinite(field_y_m):
+            raise ValueError("fallback_target requires finite field x/y")
+        target_id = str(value.get("target_id") or "drop_zone_center")
+        return {
+            "valid": True,
+            "id": str(value.get("id") or target_id),
+            "target_id": target_id,
+            "class_name": str(value.get("class_name") or ""),
+            "x": field_x_m,
+            "y": field_y_m,
+            "lat": None,
+            "lon": None,
+            "score": 0.0,
+            "seen_count": 0,
+            "count": 0,
+            "raw_count": 0,
+            "weight": 0.0,
+            "track_ids": [],
+            "rank": 1,
+            "status": "fallback_center",
+        }
 
     @staticmethod
     def _bool_param(value: Any, name: str) -> bool:
@@ -538,6 +576,10 @@ class SelectDropTargetsAction(ActionModule):
             "target_slots": list(detail.get("target_slots") or []),
             "selected_count": int(detail.get("selected_count", 0)),
             "candidate_count": int(detail.get("candidate_count", 0)),
+            "first_release_servo_outputs": list(detail.get("first_release_servo_outputs") or []),
+            "first_alignment_enabled": bool(detail.get("first_alignment_enabled")),
+            "second_alignment_enabled": bool(detail.get("second_alignment_enabled")),
+            "second_release_enabled": bool(detail.get("second_release_enabled")),
         }
 
     def _bool_param(self, value: Any, name: str) -> bool:

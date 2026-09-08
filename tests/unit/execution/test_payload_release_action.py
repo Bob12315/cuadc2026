@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from missions.common.actions import payload_release as payload_release_module
 from execution.dispatcher import ActionDispatcher
+from missions.common.actions import payload_release as payload_release_module
 from missions.common.actions.payload_release import PayloadReleaseAction
 
 
@@ -270,7 +270,9 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
             calls.append(("velocity", vx, vy, vz, frame, yaw_rad))
 
     action = PayloadReleaseAction()
-    action.start(_params())
+    action.start(_params(servo_outputs=[
+        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
+    ]))
     result = action.update({"field_heading_yaw_rad": 1.2})
     dispatcher = ActionDispatcher(test_source="test")
     from execution.authorization import RunAuthorization
@@ -287,7 +289,7 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
     )
 
     assert [item["action_type"] for item in dispatch["accepted"]] == ["set_servo", "flight_command"]
-    assert calls[0][:3] == ("servo", 8, 1200)
+    assert calls[0][:3] == ("servo", 9, 1800)
     assert calls[1][0:4] == ("velocity", 0.0, 0.0, 0.0)
 
 
@@ -339,6 +341,18 @@ def test_stop_then_update_returns_stopped_without_hold_action() -> None:
     assert result.done is True
     assert result.reason == "stopped"
     assert result.actions == []
+
+
+def test_disabled_release_completes_without_servo_effects() -> None:
+    action = PayloadReleaseAction()
+    action.start(_params(enabled=False))
+
+    result = action.update({})
+
+    assert result.done and not result.failed
+    assert result.reason == "payload_release_skipped"
+    assert result.actions == []
+    assert result.detail["enabled"] is False
 
 
 def test_reset_then_update_returns_action_not_started() -> None:

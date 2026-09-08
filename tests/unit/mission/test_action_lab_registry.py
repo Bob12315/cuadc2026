@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from execution.policy import ACTION_DISPATCH_POLICY
 from missions.common.actions.action_lab import (
@@ -9,6 +10,8 @@ from missions.common.actions.action_lab import (
     create_action_lab_registry,
 )
 from missions.common.actions.registry import default_registry
+
+ROOT = Path(__file__).parents[3]
 
 
 def test_action_definition_is_the_single_registry_and_web_catalog() -> None:
@@ -26,15 +29,46 @@ def test_action_definition_is_the_single_registry_and_web_catalog() -> None:
         assert spec["parameter_schema"]["type"] == "object"
 
 
-def test_action_definition_defaults_keep_global_field_and_send_boundaries() -> None:
+def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> None:
     definitions = {definition.name: definition for definition in action_definitions()}
+    full_v2 = json.loads(
+        (ROOT / "config/action_missions/rescue_2026_full_auto.json").read_text()
+    )
+    first_step = {}
+    for step in full_v2["steps"]:
+        first_step.setdefault(step["name"], step["params"])
+
+    for name in ("takeoff", "land", "change_speed"):
+        assert definitions[name].default_params == first_step[name]
+
+    align = dict(first_step["align_descend"])
+    align["enabled"] = True
+    assert definitions["align_descend"].default_params == align
+
     goto = definitions["goto_waypoint"].default_params
-    assert goto == {
-        "field_x_m": 0, "field_y_m": 30, "altitude_m": 3,
-        "tolerance_xy_m": 3, "tolerance_z_m": 3, "min_hold_updates": 1,
-        "require_velocity_valid": False, "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.10, "priority": 4, "yaw_mode": "hold",
-    }
+    expected_goto = dict(first_step["goto_waypoint"])
+    expected_goto["field_x_m"] = expected_goto.pop("x")
+    expected_goto["field_y_m"] = expected_goto.pop("y")
+    assert goto == expected_goto
+
+    capture = definitions["gps_capture_view"].default_params
+    assert capture == first_step["gps_capture_view"]
+
+    fuse = dict(first_step["gps_fuse_views"])
+    fuse["views"] = []
+    assert definitions["gps_fuse_views"].default_params == fuse
+
+    select = dict(first_step["select_drop_targets"])
+    select["objects"] = []
+    assert definitions["select_drop_targets"].default_params == select
+
+    payload = dict(first_step["payload_release"])
+    payload["target_id"] = "target_debug"
+    payload["servo_outputs"] = [
+        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
+    ]
+    assert definitions["payload_release"].default_params == payload
+
     assert definitions["align_descend"].default_params["vx_sign"] == -1.0
     assert definitions["align_descend"].default_params["vy_sign"] == 1.0
     assert "manual_step" not in definitions

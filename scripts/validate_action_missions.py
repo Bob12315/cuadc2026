@@ -6,14 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from missions.common.actions.action_lab import (
+    action_definition,
+    create_action_lab_registry,
+)
 from missions.engine import MissionBlackboard
-from missions.common.actions.action_lab import action_definition, create_action_lab_registry
-
 
 DEFAULT_TEMPLATE_PATHS = [
     ROOT / "config/action_missions/drop_two_targets.json",
@@ -207,7 +208,17 @@ def _example_output(action_name: str) -> dict[str, Any]:
                 "local_x": 1.0, "local_y": 1.0, "x": 1.0, "y": 1.0, "east_m": 1.0, "north_m": 1.0,
                 "lat": 34.0, "lon": 108.0, "score": 500.0, "seen_count": 2, "count": 2,
                 "raw_count": 2, "weight": 1.0, "track_ids": [1], "rank": 1}
-        return {"selected_targets": [slot], "target_slots": [slot, dict(slot, rank=2)], "selected_count": 2, "candidate_count": 2}
+        servo = {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600}
+        return {
+            "selected_targets": [slot],
+            "target_slots": [slot, dict(slot, rank=2)],
+            "selected_count": 2,
+            "candidate_count": 2,
+            "first_release_servo_outputs": [servo],
+            "first_alignment_enabled": True,
+            "second_alignment_enabled": True,
+            "second_release_enabled": True,
+        }
     if action_name in {"target_lock", "gps_target_lock"}:
         return {"locked_track_id": 1}
     return {}

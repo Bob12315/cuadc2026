@@ -32,18 +32,27 @@ class GotoWaypointAction(ActionModule):
         self.altitude_m = self._required_float(data, "altitude_m")
         if self.altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
-        if data.get("lat") is not None and data.get("lon") is not None:
+        target = data.get("target")
+        self._skipped = self.skip_if_invalid_target and (
+            (isinstance(target, dict) and target.get("valid") is False)
+            or data.get("target_valid") is False
+        )
+        coordinate_source = target if isinstance(target, dict) else data
+        if self._skipped:
+            self.input_kind = "skipped"
+            self.field_x_m = self.field_y_m = self.lat = self.lon = None
+        elif coordinate_source.get("lat") is not None and coordinate_source.get("lon") is not None:
             self.input_kind = "resolved_gps"
-            self.lat = self._required_float(data, "lat")
-            self.lon = self._required_float(data, "lon")
+            self.lat = self._required_float(coordinate_source, "lat")
+            self.lon = self._required_float(coordinate_source, "lon")
             if not -90.0 <= self.lat <= 90.0 or not -180.0 <= self.lon <= 180.0:
                 raise ValueError("GPS target is out of WGS84 range")
             self.field_x_m = self.field_y_m = None
         else:
             self.input_kind = "field"
             # x/y are temporary spelling compatibility; they mean FIELD, never LOCAL_NED.
-            self.field_x_m = self._required_float(data, "field_x_m", "x")
-            self.field_y_m = self._required_float(data, "field_y_m", "y")
+            self.field_x_m = self._required_float(coordinate_source, "field_x_m", "x")
+            self.field_y_m = self._required_float(coordinate_source, "field_y_m", "y")
             self.lat = self.lon = None
 
         yaw_mode = str(data.get("yaw_mode", "")).strip().lower()
@@ -66,10 +75,6 @@ class GotoWaypointAction(ActionModule):
         self.priority = int(data.get("priority", 4))
         self.key = str(data.get("key") or "goto_field_gps").strip() or "goto_field_gps"
         self.started, self.stopped, self.reached_updates = True, False, 0
-        target = data.get("target")
-        self._skipped = self.skip_if_invalid_target and (
-            (isinstance(target, dict) and target.get("valid") is False) or data.get("target_valid") is False
-        )
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:

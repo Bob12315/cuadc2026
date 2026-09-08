@@ -16,6 +16,7 @@ class PayloadReleaseAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
+        self.enabled = self._boolean(data.get("enabled", True), "enabled")
         self.servo_outputs = self._servo_outputs(data)
         self.channels = [item["channel"] for item in self.servo_outputs]
         self.release_pwm = self.servo_outputs[0]["release_pwm"]
@@ -31,7 +32,7 @@ class PayloadReleaseAction(ActionModule):
         self.release_time = data.get("release_time")
 
         self.started = True
-        self.state = "release"
+        self.state = "release" if self.enabled else "skipped"
         self.wait_updates = 0
         self.release_sent = False
         self.hold_sent = False
@@ -45,6 +46,16 @@ class PayloadReleaseAction(ActionModule):
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
             return ActionResult(done=True, reason="stopped", effects=ActionResult.typed([]), detail=self._detail())
+        if not self.enabled:
+            self.done = True
+            self.state = "done"
+            self.last_detail = self._detail(context)
+            return ActionResult(
+                done=True,
+                reason="payload_release_skipped",
+                effects=ActionResult.typed([]),
+                detail=self.last_detail,
+            )
         if self.done:
             return ActionResult(done=True, reason="payload_released", effects=ActionResult.typed([]), detail=self.last_detail)
 
@@ -97,6 +108,7 @@ class PayloadReleaseAction(ActionModule):
 
     def reset(self) -> None:
         self.started = False
+        self.enabled = True
         self.state = "idle"
         self.servo_outputs: list[dict[str, int]] = []
         self.channels: list[int] = []
@@ -134,6 +146,7 @@ class PayloadReleaseAction(ActionModule):
     def _detail(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "state": self.state,
+            "enabled": self.enabled,
             "channels": list(self.channels),
             "servo_channels": list(self.channels),
             "servo_outputs": [dict(item) for item in self.servo_outputs],
@@ -193,6 +206,12 @@ class PayloadReleaseAction(ActionModule):
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _boolean(value: Any, name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"{name} must be a bool")
 
     def _servo_outputs(self, params: dict[str, Any]) -> list[dict[str, int]]:
         if params.get("servo_outputs") is not None:

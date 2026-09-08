@@ -252,6 +252,33 @@
         "coordinate_mode": "gps_enu",
         "target_count": 2,
         "allow_fewer": true,
+        "fallback_target": {
+          "valid": true,
+          "id": "drop_zone_center",
+          "target_id": "drop_zone_center",
+          "x": 0,
+          "y": 32.5,
+          "status": "fallback_center"
+        },
+        "single_target_servo_outputs": [
+          {
+            "channel": 9,
+            "release_pwm": 1800,
+            "hold_pwm": 1600
+          },
+          {
+            "channel": 10,
+            "release_pwm": 1800,
+            "hold_pwm": 1600
+          }
+        ],
+        "multi_target_first_servo_outputs": [
+          {
+            "channel": 9,
+            "release_pwm": 1800,
+            "hold_pwm": 1600
+          }
+        ],
         "score_table": {
           "bucket_1": 500,
           "bucket_2": 300,
@@ -291,8 +318,7 @@
         "action": "continue"
       },
       "params": {
-        "lat": "$drop_targets.target_slots.0.lat",
-        "lon": "$drop_targets.target_slots.0.lon",
+        "target": "$drop_targets.target_slots.0",
         "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
@@ -314,6 +340,8 @@
         "action": "continue"
       },
       "params": {
+        "enabled": "$drop_targets.first_alignment_enabled",
+        "complete_on_timeout": true,
         "target_altitude_m": 1.2,
         "descend_speed_mps": 0.3,
         "release_deadband_ex": 0.02,
@@ -337,15 +365,10 @@
         "action": "continue"
       },
       "params": {
+        "enabled": true,
         "payload_id": "payload_1",
         "target_id": "$drop_targets.target_slots.0.target_id",
-        "servo_outputs": [
-          {
-            "channel": 9,
-            "release_pwm": 1800,
-            "hold_pwm": 1600
-          }
-        ],
+        "servo_outputs": "$drop_targets.first_release_servo_outputs",
         "priority": 3,
         "release_wait_s": 1,
         "release_wait_updates": 5,
@@ -359,8 +382,7 @@
         "action": "continue"
       },
       "params": {
-        "lat": "$drop_targets.target_slots.0.lat",
-        "lon": "$drop_targets.target_slots.0.lon",
+        "target": "$drop_targets.target_slots.0",
         "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
@@ -379,8 +401,7 @@
         "action": "continue"
       },
       "params": {
-        "lat": "$drop_targets.target_slots.1.lat",
-        "lon": "$drop_targets.target_slots.1.lon",
+        "target": "$drop_targets.target_slots.1",
         "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
@@ -402,6 +423,8 @@
         "action": "continue"
       },
       "params": {
+        "enabled": "$drop_targets.second_alignment_enabled",
+        "complete_on_timeout": true,
         "target_altitude_m": 1.2,
         "descend_speed_mps": 0.3,
         "release_deadband_ex": 0.02,
@@ -425,6 +448,7 @@
         "action": "continue"
       },
       "params": {
+        "enabled": "$drop_targets.second_release_enabled",
         "payload_id": "payload_2",
         "target_id": "$drop_targets.target_slots.1.target_id",
         "servo_outputs": [
@@ -447,8 +471,7 @@
         "action": "continue"
       },
       "params": {
-        "lat": "$drop_targets.target_slots.1.lat",
-        "lon": "$drop_targets.target_slots.1.lon",
+        "target": "$drop_targets.target_slots.1",
         "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
@@ -671,6 +694,8 @@
         "action": "continue"
       },
       "params": {
+        "enabled": true,
+        "complete_on_timeout": false,
         "target_altitude_m": 0.3,
         "descend_speed_mps": 0.3,
         "release_deadband_ex": 0.3,
