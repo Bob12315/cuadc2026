@@ -39,11 +39,29 @@
   var SERVO_PRESETS = {
     servo1: {
       label: "舵机 1：后方 SERVO8",
-      params: {servo: 1, position: "rear", channel: 8, lock_pwm: 1370, release_pwm: 1800},
+      params: {
+        enabled: true,
+        payload_id: "payload_1",
+        target_id: "target_debug",
+        servo_outputs: [{channel: 8, release_pwm: 1800, hold_pwm: 1370}],
+        priority: 3,
+        release_wait_s: 1,
+        release_wait_updates: 5,
+        key: "manual_rear_servo8_release",
+      },
     },
     servo2: {
       label: "舵机 2：前方 SERVO9",
-      params: {servo: 2, position: "front", channel: 9, lock_pwm: 1325, release_pwm: 1745},
+      params: {
+        enabled: true,
+        payload_id: "payload_2",
+        target_id: "target_debug",
+        servo_outputs: [{channel: 9, release_pwm: 1745, hold_pwm: 1325}],
+        priority: 3,
+        release_wait_s: 1,
+        release_wait_updates: 5,
+        key: "manual_front_servo9_release",
+      },
     },
   };
 
@@ -172,18 +190,19 @@
     var preset = SERVO_PRESETS[name];
     if (!preset) return;
     cacheSelectedActionParams();
-    labState.selectedActionName = "";
+    var output = preset.params.servo_outputs[0];
+    labState.selectedActionName = "payload_release";
     _dom().$("actionParams").value = JSON.stringify(preset.params, null, 2);
     _dom().$("actionParamHint").textContent = preset.label + "：锁定 "
-      + preset.params.lock_pwm + "，投放 " + preset.params.release_pwm
-      + "。仅展示参数，不会执行 payload_release。";
-    _dom().$("actionSafetyHint").textContent = "舵机预设不绑定 Action run，不能从此处发送命令。";
+      + output.hold_pwm + "，投放 " + output.release_pwm
+      + "。已绑定 payload_release，需点击“Start Authorized Run”后才执行。";
+    _dom().$("actionSafetyHint").textContent = "舵机预设绑定本次 payload_release Action run；实际发送仍需 run 授权与 System SEND=ON。";
     if (_dom().$("servoSelectionHint")) {
       _dom().$("servoSelectionHint").textContent = preset.label
-        + " 已选择：锁定 " + preset.params.lock_pwm + "，投放 " + preset.params.release_pwm
-        + "。未执行任何 Action。";
+        + " 已绑定：锁定 " + output.hold_pwm + "，投放 " + output.release_pwm
+        + "。点击“Start Authorized Run”前未执行任何 Action。";
     }
-    if (cfg.setCompletionHint) cfg.setCompletionHint("已选择 " + preset.label + " 参数；不会执行或发送。");
+    if (cfg.setCompletionHint) cfg.setCompletionHint("已选择 " + preset.label + "；可授权启动本次 Action run。");
     document.querySelectorAll("[data-action-name]").forEach(function (button) {
       button.classList.remove("active-choice");
     });

@@ -35,9 +35,10 @@ def test_fetch_is_owned_only_by_api_client() -> None:
     assert offenders == []
 
 
-def test_action_ui_only_selects_servo_presets_without_a_payload_release_run_button() -> None:
+def test_action_ui_binds_servo_presets_to_a_payload_release_run_without_a_direct_run_button() -> None:
     html = (ROOT / "web_ui/static/index.html").read_text()
     control = (ROOT / "web_ui/static/js/control.js").read_text()
+    action_lab = (ROOT / "web_ui/static/js/action_lab.js").read_text()
 
     assert 'id="servo1Select"' in html
     assert 'id="servo2Select"' in html
@@ -45,3 +46,4 @@ def test_action_ui_only_selects_servo_presets_without_a_payload_release_run_butt
     assert 'id="payloadReleaseRun"' not in html
     assert 'selectAction("payload_release")' not in control
     assert 'startActionLabAction(true)' not in control
+    assert 'labState.selectedActionName = "payload_release"' in action_lab
