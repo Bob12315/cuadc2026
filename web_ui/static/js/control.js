@@ -508,6 +508,7 @@ if (window.UavActionLab && window.UavActionLab.configure) {
 var loadActionLab = function () { return window.UavActionLab.loadActionLab(); };
 var cacheSelectedActionParams = function () { window.UavActionLab.cacheSelectedActionParams(); };
 var selectAction = function (name) { return window.UavActionLab.selectAction(name); };
+var selectServoPreset = function (name) { return window.UavActionLab.selectServoPreset(name); };
 var refreshActionStatus = function () { return window.UavActionLab.refreshActionStatus(); };
 var renderActionLabStatus = function (actionLab) { window.UavActionLab.renderActionLabStatus(actionLab); };
 var nodeInside = function (element, node) { return window.UavActionLab.nodeInside(element, node); };
@@ -904,13 +905,11 @@ async function init() {
   document.querySelectorAll("[data-action-mission-preset]").forEach(button => {
     button.onclick = () => loadActionMissionPreset(button.dataset.actionMissionPreset);
   });
-  if ($("payloadReleaseSelect")) $("payloadReleaseSelect").onclick = () => {
-    selectAction("payload_release");
-  };
-  if ($("payloadReleaseRun")) $("payloadReleaseRun").onclick = () => {
-    selectAction("payload_release");
-    startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
-  };
+  if ($("servo1Select")) $("servo1Select").dataset.servoPreset = "servo1";
+  if ($("servo2Select")) $("servo2Select").dataset.servoPreset = "servo2";
+  document.querySelectorAll("[data-servo-preset]").forEach(button => {
+    button.onclick = () => selectServoPreset(button.dataset.servoPreset);
+  });
   await loadActionLab();
   startStatusUpdates();
 }

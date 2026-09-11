@@ -33,3 +33,15 @@ def test_fetch_is_owned_only_by_api_client() -> None:
         if path.name != "api_client.js" and "fetch(" in path.read_text():
             offenders.append(path.relative_to(ROOT).as_posix())
     assert offenders == []
+
+
+def test_action_ui_only_selects_servo_presets_without_a_payload_release_run_button() -> None:
+    html = (ROOT / "web_ui/static/index.html").read_text()
+    control = (ROOT / "web_ui/static/js/control.js").read_text()
+
+    assert 'id="servo1Select"' in html
+    assert 'id="servo2Select"' in html
+    assert 'id="payloadReleaseSelect"' not in html
+    assert 'id="payloadReleaseRun"' not in html
+    assert 'selectAction("payload_release")' not in control
+    assert 'startActionLabAction(true)' not in control

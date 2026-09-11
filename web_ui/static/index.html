@@ -109,11 +109,11 @@
       <div class="action-lab-layout">
         <div>
           <div id="actionButtons" class="action-buttons"></div>
-          <div class="payload-release-zone">
-            <div class="panel-title minor">Payload Release Action</div>
-            <button id="payloadReleaseSelect" class="danger">选择 payload_release</button>
-            <button id="payloadReleaseRun" class="danger">执行 payload_release</button>
-            <div class="hint">高风险舵机输出：仍需 Action run 授权，并受 System SEND 门控制。</div>
+          <div class="servo-selection-zone">
+            <div class="panel-title minor">舵机参数选择</div>
+            <button id="servo1Select">舵机 1：后方 SERVO8</button>
+            <button id="servo2Select">舵机 2：前方 SERVO9</button>
+            <div id="servoSelectionHint" class="hint">仅选择并展示舵机参数；不会执行投放 Action 或发送飞控命令。</div>
           </div>
           <div class="hint" id="actionParamHint">选择一个 Action 查看参数。</div>
         </div>
@@ -364,7 +364,7 @@
   <script src="/static/js/mission.js?v=architecture-refactor-20260813-1"></script>
   <script src="/static/js/field_reference.js?v=competition-field-20260710-1"></script>
   <script src="/static/js/field_profile.js?v=competition-field-20260710-1"></script>
-  <script src="/static/js/action_lab.js?v=recon-area-ranking-20260714-1"></script>
+  <script src="/static/js/action_lab.js?v=servo-selection-20260911-1"></script>
   <script src="/static/js/field/model.js?v=field-map-reset-20260826-1"></script>
   <script src="/static/js/field/render.js?v=architecture-refactor-20260813-1"></script>
   <script src="/static/js/field/interaction.js?v=field-map-demo-20260826-3"></script>

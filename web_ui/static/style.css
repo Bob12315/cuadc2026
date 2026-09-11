@@ -369,10 +369,10 @@ button.active-choice {
   gap: 7px;
   margin-top: 12px;
 }
-.payload-release-zone {
+.servo-selection-zone {
   margin-top: 4px;
 }
-.payload-release-zone button {
+.servo-selection-zone button {
   margin-right: 7px;
   margin-top: 4px;
 }

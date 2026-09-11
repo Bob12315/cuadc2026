@@ -36,6 +36,17 @@
     "gps_target_lock",
   ]);
 
+  var SERVO_PRESETS = {
+    servo1: {
+      label: "舵机 1：后方 SERVO8",
+      params: {servo: 1, position: "rear", channel: 8, lock_pwm: 1370, release_pwm: 1800},
+    },
+    servo2: {
+      label: "舵机 2：前方 SERVO9",
+      params: {servo: 2, position: "front", channel: 9, lock_pwm: 1325, release_pwm: 1745},
+    },
+  };
+
   // ------------------------------------------------------------------
   // configure — called once by app.js after script loads
   // ------------------------------------------------------------------
@@ -151,6 +162,34 @@
     document.querySelectorAll("[data-action-name]").forEach(function (button) {
       button.classList.toggle("active-choice", button.dataset.actionName === spec.name);
     });
+    document.querySelectorAll("[data-servo-preset]").forEach(function (button) {
+      button.classList.remove("active-choice");
+    });
+    renderActionLabStatus(labState.latestActionLab);
+  }
+
+  function selectServoPreset(name) {
+    var preset = SERVO_PRESETS[name];
+    if (!preset) return;
+    cacheSelectedActionParams();
+    labState.selectedActionName = "";
+    _dom().$("actionParams").value = JSON.stringify(preset.params, null, 2);
+    _dom().$("actionParamHint").textContent = preset.label + "：锁定 "
+      + preset.params.lock_pwm + "，投放 " + preset.params.release_pwm
+      + "。仅展示参数，不会执行 payload_release。";
+    _dom().$("actionSafetyHint").textContent = "舵机预设不绑定 Action run，不能从此处发送命令。";
+    if (_dom().$("servoSelectionHint")) {
+      _dom().$("servoSelectionHint").textContent = preset.label
+        + " 已选择：锁定 " + preset.params.lock_pwm + "，投放 " + preset.params.release_pwm
+        + "。未执行任何 Action。";
+    }
+    if (cfg.setCompletionHint) cfg.setCompletionHint("已选择 " + preset.label + " 参数；不会执行或发送。");
+    document.querySelectorAll("[data-action-name]").forEach(function (button) {
+      button.classList.remove("active-choice");
+    });
+    document.querySelectorAll("[data-servo-preset]").forEach(function (button) {
+      button.classList.toggle("active-choice", button.dataset.servoPreset === name);
+    });
     renderActionLabStatus(labState.latestActionLab);
   }
 
@@ -195,6 +234,7 @@
       $("actionRunToggle").classList.toggle("stop", selectedIsRunning);
     }
     if ($("actionStop")) $("actionStop").disabled = !Boolean(status && status.running);
+    if ($("actionDispatchStart")) $("actionDispatchStart").disabled = !labState.selectedActionName;
     var set = _dom().setOptionalText;
     var st = _state();
     var ctrl = st.controllers || {};
@@ -373,6 +413,7 @@
 
     loadActionLab: loadActionLab,
     selectAction: selectAction,
+    selectServoPreset: selectServoPreset,
     cacheSelectedActionParams: cacheSelectedActionParams,
     parseActionParams: parseActionParams,
     refreshActionStatus: refreshActionStatus,
