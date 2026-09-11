@@ -205,23 +205,23 @@ def test_select_drop_targets_allow_fewer_accepts_zero_targets() -> None:
 @pytest.mark.parametrize(
     ("objects", "expected_first_channels", "first_align", "second_align", "second_release"),
     [
-        ([], [9, 10], False, False, False),
+        ([], [8, 9], False, False, False),
         ([{"id": "b1", "class_name": "bucket", "lat": 34.0, "lon": 108.0,
            "east_m": 1.0, "north_m": 2.0, "seen_count": 3, "raw_count": 3}],
-         [9, 10], True, False, False),
+         [8, 9], True, False, False),
         ([{"id": "b1", "class_name": "bucket", "lat": 34.0, "lon": 108.0,
            "east_m": 1.0, "north_m": 2.0, "seen_count": 3, "raw_count": 3},
           {"id": "b2", "class_name": "bucket", "lat": 34.1, "lon": 108.1,
            "east_m": 3.0, "north_m": 4.0, "seen_count": 3, "raw_count": 3}],
-         [9], True, True, True),
+         [8], True, True, True),
     ],
 )
 def test_competition_release_plan_handles_zero_one_or_two_targets(
     objects, expected_first_channels, first_align, second_align, second_release
 ) -> None:
     outputs = [
-        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
-        {"channel": 10, "release_pwm": 1800, "hold_pwm": 1600},
+        {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
+        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
     ]
     result = _select(
         objects,

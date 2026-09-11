@@ -65,7 +65,7 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
     payload = dict(first_step["payload_release"])
     payload["target_id"] = "target_debug"
     payload["servo_outputs"] = [
-        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
+        {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
     ]
     assert definitions["payload_release"].default_params == payload
 

@@ -58,11 +58,11 @@ takeoff
 | 12 | `drop_speed_1mps` | `change_speed` | `continue` |
 | 13 | `drop_1_approach` | `goto_waypoint` | `continue` |
 | 14 | `drop_1_align` | `align_descend` | `continue` |
-| 15 | `drop_1_release` | `payload_release`（SERVO9 1800→1600） | `continue` |
+| 15 | `drop_1_release` | `payload_release`（后方 SERVO8 1800→1370） | `continue` |
 | 16 | `drop_1_climb` | `goto_waypoint` | `continue` |
 | 17 | `drop_2_approach` | `goto_waypoint` | `continue` |
 | 18 | `drop_2_align` | `align_descend` | `continue` |
-| 19 | `drop_2_release` | `payload_release`（SERVO10 1800→1600） | `continue` |
+| 19 | `drop_2_release` | `payload_release`（前方 SERVO9 1745→1325） | `continue` |
 | 20 | `drop_2_climb` | `goto_waypoint` | `continue` |
 | 21 | `restore_transition_speed_2mps` | `change_speed` | `continue` |
 | 22 | `recon_speed_1mps` | `change_speed` | `continue` |
@@ -109,14 +109,15 @@ profile、速度、高度、SERVO 输出和失败继续策略。
 
 Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但自动任务只允许后者：
 
-| 载荷 | bridge 人工 RC 输入 | 自动任务 SERVO 输出 | PWM 时序 | Gazebo detach topic |
+| 载荷 | 位置 | 自动任务 SERVO 输出 | PWM 时序（锁→投→锁） | Gazebo detach topic |
 | --- | --- | --- | --- | --- |
-| bottle1 / `payload_1` | RC13 | SERVO9 | 1600 → 1800 → 1600 | `/cuadc2026/payload/bottle1/detach` |
-| bottle2 / `payload_2` | RC14 | SERVO10 | 1600 → 1800 → 1600 | `/cuadc2026/payload/bottle2/detach` |
+| bottle1 / `payload_1` | 后方；遥控器 -26（锁）、60（投） | SERVO8 | 1370 → 1800 → 1370 | `/cuadc2026/payload/bottle1/detach` |
+| bottle2 / `payload_2` | 前方；遥控器 -35（锁）、49（投） | SERVO9 | 1325 → 1745 → 1325 | `/cuadc2026/payload/bottle2/detach` |
 
-RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`payload_release` 只经
-`set_servo` 发送 `MAV_CMD_DO_SET_SERVO`；`config/safety.yaml` 只白名单化 SERVO9/10 的
-1600--1800 PWM，禁止 RC override。
+遥控器位置按 `-100 = 1000`、`100 = 2000` 线性换算为 PWM；它们用于校准记录，绝不是
+Mission 参数。`payload_release` 只经 `set_servo` 发送 `MAV_CMD_DO_SET_SERVO`；
+`config/safety.yaml` 只白名单化 SERVO8 的 1370--1800 与 SERVO9 的 1325--1745 PWM，禁止
+RC override。
 
 ## 侦察、对准、投放原子 Action
 
@@ -127,7 +128,7 @@ RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`
 | --- | --- | --- | --- |
 | 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
 | 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
-| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放同时控制 SERVO9/10；两个目标时分别控制 SERVO9、SERVO10，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
+| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放同时控制后方 SERVO8、前方 SERVO9；两个目标时分别控制 SERVO8、SERVO9，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
 连续的 `align_descend` 在停止、超时或丢失视觉时都会发送显式零速，
 并清除旧连续命令；这不能替代飞手或地面站接管。

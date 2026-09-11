@@ -71,7 +71,7 @@ def test_default_servo_channel_is_output_8() -> None:
     assert action.channels == [8]
     assert result.detail["channels"] == [8]
     assert result.detail["servo_channels"] == [8]
-    assert result.detail["servo_outputs"] == [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]
+    assert result.detail["servo_outputs"] == [{"channel": 8, "release_pwm": 1800, "hold_pwm": 1370}]
     assert "not RC input channel" in result.detail["channel_semantics"]
 
 
@@ -271,7 +271,7 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
 
     action = PayloadReleaseAction()
     action.start(_params(servo_outputs=[
-        {"channel": 9, "release_pwm": 1800, "hold_pwm": 1600},
+        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
     ]))
     result = action.update({"field_heading_yaw_rad": 1.2})
     dispatcher = ActionDispatcher(test_source="test")
@@ -289,7 +289,7 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
     )
 
     assert [item["action_type"] for item in dispatch["accepted"]] == ["set_servo", "flight_command"]
-    assert calls[0][:3] == ("servo", 9, 1800)
+    assert calls[0][:3] == ("servo", 9, 1745)
     assert calls[1][0:4] == ("velocity", 0.0, 0.0, 0.0)
 
 

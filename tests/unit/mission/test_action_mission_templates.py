@@ -52,8 +52,8 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
     releases = [step for step in steps if step["name"] == "payload_release"]
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
     assert [step["params"]["servo_outputs"] for step in releases] == [
-        [{"channel": 9, "release_pwm": 1800, "hold_pwm": 1600}],
-        [{"channel": 10, "release_pwm": 1800, "hold_pwm": 1600}],
+        [{"channel": 8, "release_pwm": 1800, "hold_pwm": 1370}],
+        [{"channel": 9, "release_pwm": 1745, "hold_pwm": 1325}],
     ]
     for release in releases:
         index = steps.index(release)
@@ -121,7 +121,7 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
     releases = [step["params"] for step in steps if step["name"] == "payload_release"]
     assert releases[0]["servo_outputs"] == "$drop_targets.first_release_servo_outputs"
     assert releases[1]["servo_outputs"] == [
-        {"channel": 10, "release_pwm": 1800, "hold_pwm": 1600},
+        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
     ]
 
 
@@ -138,8 +138,13 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
         "y": 32.5,
         "status": "fallback_center",
     }
-    assert [item["channel"] for item in selector["single_target_servo_outputs"]] == [9, 10]
-    assert [item["channel"] for item in selector["multi_target_first_servo_outputs"]] == [9]
+    assert selector["single_target_servo_outputs"] == [
+        {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
+        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
+    ]
+    assert selector["multi_target_first_servo_outputs"] == [
+        {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
+    ]
 
     assert by_label["drop_1_approach"]["params"]["target"] == "$drop_targets.target_slots.0"
     assert by_label["drop_2_approach"]["params"]["target"] == "$drop_targets.target_slots.1"

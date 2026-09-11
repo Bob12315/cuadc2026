@@ -326,9 +326,9 @@
         "target_id": "$drop_targets.target_slots.0.target_id",
         "servo_outputs": [
           {
-            "channel": 9,
+            "channel": 8,
             "release_pwm": 1800,
-            "hold_pwm": 1600
+            "hold_pwm": 1370
           }
         ],
         "priority": 3,
@@ -414,9 +414,9 @@
         "target_id": "$drop_targets.target_slots.1.target_id",
         "servo_outputs": [
           {
-            "channel": 10,
-            "release_pwm": 1800,
-            "hold_pwm": 1600
+            "channel": 9,
+            "release_pwm": 1745,
+            "hold_pwm": 1325
           }
         ],
         "priority": 3,

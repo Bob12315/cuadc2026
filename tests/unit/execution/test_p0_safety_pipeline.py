@@ -153,8 +153,8 @@ def test_navigation_takeoff_and_payload_envelopes_fail_closed() -> None:
 def test_sitl_payload_outputs_match_the_gazebo_release_bridge() -> None:
     config = load_safety_config()
     assert [(item.servo_output, item.min_pwm, item.max_pwm) for item in config.servo_outputs] == [
-        (9, 1600, 1800),
-        (10, 1600, 1800),
+        (8, 1370, 1800),
+        (9, 1325, 1745),
     ]
 
 

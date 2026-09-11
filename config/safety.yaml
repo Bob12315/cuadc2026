@@ -34,12 +34,12 @@ takeoff:
 payload:
   allowed_actions: [payload_release]
   outputs:
+    - servo_output: 8
+      min_pwm: 1370
+      max_pwm: 1800
     - servo_output: 9
-      min_pwm: 1600
-      max_pwm: 1800
-    - servo_output: 10
-      min_pwm: 1600
-      max_pwm: 1800
+      min_pwm: 1325
+      max_pwm: 1745
 
 sources:
   sitl:
