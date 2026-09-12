@@ -30,13 +30,18 @@ from typing import Any, Dict, List, Tuple
 
 @dataclass(frozen=True, slots=True)
 class GpsScanTarget:
-    """A GLOBAL GPS waypoint target ready for flight dispatch."""
+    """A GLOBAL GPS waypoint target ready for flight dispatch.
+
+    FIELD +Y is the fixed field-centre direction, so resolver-produced
+    navigation targets deliberately face that heading.
+    """
 
     name: str
     lat: float
     lon: float
     altitude_m: float
-    yaw_mode: str = "hold"
+    yaw_mode: str = "field_heading"
+    field_yaw_deg: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +199,7 @@ class RuntimeFieldTargetResolver:
             lat=float(h["lat"]),
             lon=float(h["lon"]),
             altitude_m=float(alt),
-            yaw_mode="hold",
+            yaw_mode="field_heading",
         )
 
     def scan_waypoints(
@@ -222,7 +227,7 @@ class RuntimeFieldTargetResolver:
                 lat=float(wp["lat"]),
                 lon=float(wp["lon"]),
                 altitude_m=float(alt),
-                yaw_mode="hold",
+                yaw_mode="field_heading",
             ))
         return tuple(result)
 
@@ -244,7 +249,7 @@ class RuntimeFieldTargetResolver:
                     lat=float(wp["lat"]),
                     lon=float(wp["lon"]),
                     altitude_m=float(alt),
-                    yaw_mode="hold",
+                    yaw_mode="field_heading",
                 )
         raise RuntimeFieldTargetError(f"unknown target: {name!r}")
 
@@ -258,7 +263,7 @@ class RuntimeFieldTargetResolver:
 
             {"lat": <lat>, "lon": <lon>, "altitude_m": <alt>,
              "target_frame": "global", "waypoint_mode": "absolute",
-             "yaw_mode": "hold"}
+             "yaw_mode": "field_heading", "field_yaw_deg": 0.0}
         """
         t = self.target_by_name(name, altitude_m=altitude_m)
         return {
@@ -268,6 +273,7 @@ class RuntimeFieldTargetResolver:
             "target_frame": "global",
             "waypoint_mode": "absolute",
             "yaw_mode": t.yaw_mode,
+            "field_yaw_deg": t.field_yaw_deg,
             "key": f"global_scan_{name}",
         }
 

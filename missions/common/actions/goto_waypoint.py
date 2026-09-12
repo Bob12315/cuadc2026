@@ -13,7 +13,7 @@ from .result import ActionResult
 
 
 class GotoWaypointAction(ActionModule):
-    """Convert a FIELD target to GPS without changing yaw by default.
+    """Convert a FIELD target to GPS while facing FIELD +Y by default.
 
     This Action emits only ``global_goto``.  ``yaw_mode=hold`` snapshots the
     first valid vehicle yaw and includes it in every MAVLink target, preventing
@@ -56,11 +56,10 @@ class GotoWaypointAction(ActionModule):
             self.field_y_m = self._required_float(coordinate_source, "field_y_m", "y")
             self.lat = self.lon = None
 
-        yaw_mode = str(data.get("yaw_mode", "")).strip().lower()
-        if not yaw_mode:
-            yaw_mode = "field_heading" if any(
-                name in data for name in ("field_yaw_deg", "yaw_deg")
-            ) else "hold"
+        # FIELD +Y is the agreed field-centre direction.  Keep ``hold`` as an
+        # explicit compatibility option, but make every unspecified goto face
+        # that fixed field heading.
+        yaw_mode = str(data.get("yaw_mode") or "field_heading").strip().lower()
         if yaw_mode not in {"hold", "field_heading"}:
             raise ValueError("yaw_mode must be 'hold' or 'field_heading'")
         self.yaw_mode = yaw_mode
@@ -227,7 +226,7 @@ class GotoWaypointAction(ActionModule):
         self.input_kind = "field"
         self.field_x_m = self.field_y_m = self.lat = self.lon = None
         self.altitude_m = self.field_yaw_deg = 0.0
-        self.yaw_mode = "hold"
+        self.yaw_mode = "field_heading"
         self.hold_yaw_rad: float | None = None
         self.tolerance_xy_m = self.tolerance_z_m = 0.30
         self.min_hold_updates, self.require_velocity_valid = 1, False

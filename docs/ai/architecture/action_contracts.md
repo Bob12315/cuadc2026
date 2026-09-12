@@ -26,10 +26,10 @@ FIELD 航点建议迁移为：
 ```
 
 `goto_waypoint` 只接受 FIELD 输入并只发送 GLOBAL GPS 目标。默认
-`yaw_mode=hold` 时，Action 会锁定启动后的首个有效飞行器 yaw，并在每个
-GLOBAL GPS 目标中显式下发该角度，避免 GUIDED 自动机头朝向航点；只有明确
-`yaw_mode=field_heading` 时，才把 `field_yaw_deg`（相对 FIELD +Y、顺时针为正）
-转换为飞控北基准实际偏航。
+`yaw_mode=field_heading`，以 `field_yaw_deg=0.0` 始终朝向 FIELD +Y（已定义为
+场地中央方向），并转换为飞控北基准实际偏航。`yaw_mode=hold` 仅保留为明确
+指定时的兼容选项：它锁定启动后的首个有效飞行器 yaw，并在每个 GLOBAL GPS
+目标中显式下发该角度。
 不再生成 LOCAL_NED 航点。BODY_NED 速度建议使用
 `vx_forward_mps/vy_right_mps/vz_down_mps`。完整符号约定见
 [坐标系规范](../../developer/coordinate_frames.md)。

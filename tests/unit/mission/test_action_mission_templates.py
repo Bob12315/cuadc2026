@@ -33,6 +33,15 @@ def test_formal_templates_validate_and_actions_are_registered() -> None:
                               label=step.get("label"), on_failed=step.get("on_failed"))
 
 
+def test_every_template_goto_faces_the_fixed_field_positive_y_direction() -> None:
+    for path in DEFAULT_TEMPLATE_PATHS:
+        for step in _load(path)["steps"]:
+            if step["name"] != "goto_waypoint":
+                continue
+            assert step["params"]["yaw_mode"] == "field_heading"
+            assert step["params"]["field_yaw_deg"] == 0
+
+
 def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -> None:
     steps = _load(ROOT / "config/action_missions/drop_two_targets.json")["steps"]
     names = [step["name"] for step in steps]

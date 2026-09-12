@@ -44,6 +44,12 @@ def test_field_heading_yaw_mode_sends_explicit_yaw() -> None:
     assert math.isclose(request["params"]["yaw"], 3 * math.pi / 4)
 
 
+def test_default_yaw_mode_faces_field_positive_y() -> None:
+    request = _active_action({})
+
+    assert math.isclose(request["params"]["yaw"], math.pi / 4)
+
+
 def test_target_object_can_supply_field_coordinates() -> None:
     action = GotoWaypointAction()
     action.start({
