@@ -42,6 +42,14 @@ def test_every_template_goto_faces_the_fixed_field_positive_y_direction() -> Non
             assert step["params"]["field_yaw_deg"] == 0
 
 
+def test_every_template_takeoff_uses_the_field_centerline_default() -> None:
+    for path in DEFAULT_TEMPLATE_PATHS:
+        takeoffs = [step for step in _load(path)["steps"] if step["name"] == "takeoff"]
+        assert len(takeoffs) == 1
+        assert takeoffs[0]["params"]["yaw_mode"] == "field_heading"
+        assert takeoffs[0]["params"]["takeoff_yaw_deg"] is None
+
+
 def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -> None:
     steps = _load(ROOT / "config/action_missions/drop_two_targets.json")["steps"]
     names = [step["name"] for step in steps]

@@ -14,7 +14,7 @@
         "max_updates": 150,
         "max_duration_s": 45,
         "yaw_mode": "field_heading",
-        "field_yaw_deg": 0,
+        "takeoff_yaw_deg": null,
         "yaw_tolerance_deg": 5.0,
         "yaw_min_hold_updates": 2,
         "yaw_timeout_s": 12.0,

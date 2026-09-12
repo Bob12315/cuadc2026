@@ -45,11 +45,14 @@ Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 
 ## 起飞后的固定场地朝向
 
-`takeoff` 默认在高度门槛达到后，发送绝对 `condition_yaw` 并等待稳定的
-偏航遥测，直到机头朝向 `FIELD +Y`（`yaw_mode=field_heading`、
-`field_yaw_deg=0.0`）。默认容差为 5°、连续 2 个遥测更新、偏航阶段超时为
-12 秒。字段朝向尚未确认时，Action 会在切换模式或解锁前以
-`field_heading_not_ready` 失败；`yaw_mode=hold` 是唯一保留原行为的显式兼容选项。
+`takeoff` 在 GUIDED/ARM 确认后先发 `TAKEOFF`，下一次 Action update 立即发送
+绝对 `condition_yaw`，使整个爬升阶段锁定 `FIELD +Y`。默认
+`takeoff_yaw_deg=null` 会复用已确认的 `field_heading_yaw_rad`；显式
+`takeoff_yaw_deg` 则覆盖该默认值。该 yaw 命令使用 `relative=false`、
+`direction=0` 和默认 20°/s，且起飞完成后不再周期性重发。默认容差为 5°、
+连续 2 个遥测更新、偏航阶段超时为 12 秒。字段朝向尚未确认时，Action 会在
+切换模式或解锁前以 `field_heading_not_ready` 失败；`yaw_mode=hold` 是唯一保留
+原行为的显式兼容选项。
 
 ## 速度切换契约
 

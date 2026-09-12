@@ -15,12 +15,12 @@ GUIDED = FIELD_HEADING | {"drone": {"mode": "GUIDED", "armed": False}}
 GUIDED_ARMED = FIELD_HEADING | {"drone": {"mode": "GUIDED", "armed": True}}
 
 
-def _advance_to_wait(action: TakeoffAction) -> None:
+def _advance_to_wait(action: TakeoffAction):
     action.update(FIELD_HEADING)
     action.update(GUIDED)
     action.update(GUIDED)
     action.update(GUIDED_ARMED)
-    action.update(GUIDED_ARMED)
+    return action.update(GUIDED_ARMED)
 
 
 def test_takeoff_start_uses_default_params() -> None:
@@ -29,6 +29,8 @@ def test_takeoff_start_uses_default_params() -> None:
     assert action.altitude_m == 3.0
     assert action.mode == "GUIDED"
     assert action.yaw_mode == "field_heading"
+    assert action.takeoff_yaw_deg is None
+    assert action.yaw_speed_deg_s == 20.0
     assert action.phase == "set_mode"
 
 
@@ -172,33 +174,64 @@ def test_takeoff_fails_before_arming_when_field_heading_is_unavailable() -> None
     assert result.actions == []
 
 
-def test_takeoff_aligns_to_field_positive_y_before_completing() -> None:
+def test_takeoff_locks_field_positive_y_immediately_after_takeoff() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.0, "yaw_min_hold_updates": 2})
-    _advance_to_wait(action)
-    below_target = action.update(FIELD_HEADING | {
+    takeoff = _advance_to_wait(action)
+    command = action.update(FIELD_HEADING | {
         "relative_altitude": 1.0,
         "drone": {"attitude_valid": True, "yaw": 0.0},
     })
-    command = action.update(FIELD_HEADING | {
-        "relative_altitude": 2.8,
-        "drone": {"attitude_valid": True, "yaw": 0.0},
-    })
     first_reached = action.update({
+        "relative_altitude": 1.0,
         "drone": {"attitude_valid": True, "yaw": math.pi / 4},
     })
     complete = action.update({
+        "relative_altitude": 2.8,
         "drone": {"attitude_valid": True, "yaw": math.pi / 4},
     })
 
-    assert below_target.reason == "waiting_for_takeoff_altitude"
+    assert takeoff.actions[0]["action_type"] == "takeoff"
     assert command.reason == "field_heading_yaw_sent"
     assert command.actions[0]["action_type"] == "condition_yaw"
     assert command.actions[0]["params"]["yaw_deg"] == pytest.approx(45.0)
+    assert command.actions[0]["params"]["yaw_speed_deg_s"] == pytest.approx(20.0)
+    assert command.actions[0]["params"]["direction"] == 0
     assert command.actions[0]["params"]["relative"] is False
-    assert first_reached.reason == "waiting_for_field_heading_yaw"
+    assert command.detail["takeoff_yaw_source"] == "field_centerline"
+    assert first_reached.reason == "waiting_for_takeoff_altitude_and_field_heading"
     assert complete.done is True
     assert complete.reason == "takeoff_field_heading_reached"
+    assert action.update({}).actions == []
+
+
+def test_explicit_takeoff_yaw_overrides_field_centerline() -> None:
+    action = TakeoffAction()
+    action.start({"target_alt_m": 3.0, "takeoff_yaw_deg": 135.0})
+
+    takeoff = _advance_to_wait(action)
+    command = action.update({"relative_altitude": 0.5})
+
+    assert takeoff.actions[0]["action_type"] == "takeoff"
+    assert command.actions[0]["action_type"] == "condition_yaw"
+    assert command.actions[0]["params"] == {
+        "yaw_deg": pytest.approx(135.0),
+        "yaw_speed_deg_s": pytest.approx(20.0),
+        "direction": 0,
+        "relative": False,
+    }
+    assert command.detail["takeoff_yaw_source"] == "explicit"
+    assert command.detail["resolved_takeoff_yaw_deg"] == pytest.approx(135.0)
+
+
+def test_explicit_takeoff_yaw_does_not_require_field_heading() -> None:
+    action = TakeoffAction()
+    action.start({"takeoff_yaw_deg": 135.0})
+
+    result = action.update({})
+
+    assert result.reason == "set_mode_sent"
+    assert result.failed is False
 
 
 def test_takeoff_yaw_alignment_times_out(monkeypatch) -> None:
