@@ -32,12 +32,12 @@
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "hold",
-        "tolerance_xy_m": 0.8,
-        "tolerance_z_m": 0.6,
-        "min_hold_updates": 8,
+        "tolerance_xy_m": 0.30,
+        "tolerance_z_m": 0.30,
+        "min_hold_updates": 4,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "priority": 5,
         "key": "drop_scan_goto_1"
       }
@@ -79,12 +79,12 @@
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "hold",
-        "tolerance_xy_m": 0.8,
-        "tolerance_z_m": 0.6,
-        "min_hold_updates": 8,
+        "tolerance_xy_m": 0.30,
+        "tolerance_z_m": 0.30,
+        "min_hold_updates": 4,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "priority": 5,
         "key": "drop_scan_goto_2"
       }
@@ -126,12 +126,12 @@
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "hold",
-        "tolerance_xy_m": 0.8,
-        "tolerance_z_m": 0.6,
-        "min_hold_updates": 8,
+        "tolerance_xy_m": 0.30,
+        "tolerance_z_m": 0.30,
+        "min_hold_updates": 4,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "priority": 5,
         "key": "drop_scan_goto_3"
       }
@@ -173,12 +173,12 @@
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "hold",
-        "tolerance_xy_m": 0.8,
-        "tolerance_z_m": 0.6,
-        "min_hold_updates": 8,
+        "tolerance_xy_m": 0.30,
+        "tolerance_z_m": 0.30,
+        "min_hold_updates": 4,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "priority": 5,
         "key": "drop_scan_goto_4"
       }
@@ -287,8 +287,8 @@
         "tolerance_z_m": 0.3,
         "min_hold_updates": 3,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "key": "drop_1_approach"
       }
     },
@@ -375,8 +375,8 @@
         "tolerance_z_m": 0.3,
         "min_hold_updates": 3,
         "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.15,
-        "max_vertical_speed_mps": 0.1,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
         "key": "drop_2_approach"
       }
     },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 from contracts.frames import GLOBAL_RELATIVE_ALT_INT
@@ -66,15 +67,53 @@ class GotoWaypointAction(ActionModule):
         self.field_yaw_deg = self._finite_float(
             data.get("field_yaw_deg", data.get("yaw_deg", 0.0)), "field_yaw_deg"
         )
-        self.tolerance_xy_m = self._positive_float(data.get("tolerance_xy_m", 0.3), "tolerance_xy_m")
-        self.tolerance_z_m = self._positive_float(data.get("tolerance_z_m", 0.3), "tolerance_z_m")
-        self.min_hold_updates = max(1, int(data.get("min_hold_updates", 1)))
+        self.tolerance_xy_m = self._positive_float(data.get("tolerance_xy_m", 0.30), "tolerance_xy_m")
+        self.tolerance_z_m = self._positive_float(data.get("tolerance_z_m", 0.30), "tolerance_z_m")
+        self.min_hold_updates = max(1, int(data.get("min_hold_updates", 4)))
         self.require_velocity_valid = bool(data.get("require_velocity_valid", False))
-        self.max_horizontal_speed_mps = self._non_negative_float(data.get("max_horizontal_speed_mps", 0.15), "max_horizontal_speed_mps")
-        self.max_vertical_speed_mps = self._non_negative_float(data.get("max_vertical_speed_mps", 0.10), "max_vertical_speed_mps")
+        self.max_horizontal_speed_mps = self._non_negative_float(data.get("max_horizontal_speed_mps", 0.25), "max_horizontal_speed_mps")
+        self.max_vertical_speed_mps = self._non_negative_float(data.get("max_vertical_speed_mps", 0.15), "max_vertical_speed_mps")
+        # Arrival telemetry is noisy on real aircraft.  The normal gate below
+        # is deliberately strict; these margins describe the nearby region in
+        # which one noisy sample merely decays progress instead of discarding
+        # the whole arrival observation window.
+        self.position_hysteresis_xy_m = self._non_negative_float(
+            data.get("position_hysteresis_xy_m", 0.20), "position_hysteresis_xy_m"
+        )
+        self.position_hysteresis_z_m = self._non_negative_float(
+            data.get("position_hysteresis_z_m", 0.10), "position_hysteresis_z_m"
+        )
+        self.horizontal_speed_hysteresis_mps = self._non_negative_float(
+            data.get("horizontal_speed_hysteresis_mps", 0.10),
+            "horizontal_speed_hysteresis_mps",
+        )
+        self.vertical_speed_hysteresis_mps = self._non_negative_float(
+            data.get("vertical_speed_hysteresis_mps", 0.05),
+            "vertical_speed_hysteresis_mps",
+        )
+        self.reached_updates_decrement = max(
+            0, int(data.get("reached_updates_decrement", 1))
+        )
+        self.control_reject_max_updates = max(
+            1, int(data.get("control_reject_max_updates", 3))
+        )
+        self.control_reject_timeout_s = self._positive_float(
+            data.get("control_reject_timeout_s", 1.0),
+            "control_reject_timeout_s",
+        )
+        self.max_duration_s = self._positive_float(
+            data.get("max_duration_s", 180.0), "max_duration_s"
+        )
         self.priority = int(data.get("priority", 4))
         self.key = str(data.get("key") or "goto_field_gps").strip() or "goto_field_gps"
         self.started, self.stopped, self.reached_updates = True, False, 0
+        self.reached_update_action = "reset"
+        self.control_reject_count = 0
+        self.control_reject_started_monotonic: float | None = None
+        self.control_reject_reason: str | None = None
+        self.control_reject_elapsed_s = 0.0
+        self.started_monotonic = None
+        self.last_now_monotonic = None
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:
@@ -91,6 +130,17 @@ class GotoWaypointAction(ActionModule):
             target = self._global_target(reference)
         except FieldReferenceError as exc:
             return ActionResult(failed=True, reason="field_to_gps_failed", detail={"error": str(exc)})
+        now_monotonic = self._context_monotonic(context_data)
+        self.last_now_monotonic = now_monotonic
+        if self.started_monotonic is None:
+            self.started_monotonic = now_monotonic
+        elapsed_s = max(0.0, now_monotonic - self.started_monotonic)
+        if elapsed_s >= self.max_duration_s:
+            return ActionResult(
+                failed=True,
+                reason="goto_timeout",
+                detail=self._detail(target, None, None, None, None),
+            )
         if self.yaw_mode == "field_heading":
             yaw_rad = self._normalize_yaw(
                 float(reference.field_heading_yaw_rad) + math.radians(self.field_yaw_deg)
@@ -105,6 +155,30 @@ class GotoWaypointAction(ActionModule):
                     )
                 self.hold_yaw_rad = self._normalize_yaw(current_yaw)
             yaw_rad = self.hold_yaw_rad
+        control_rejection = self._control_rejection(context_data)
+        if control_rejection is not None:
+            control_rejected = self._record_control_rejection(
+                control_rejection, now_monotonic
+            )
+            detail = self._detail(target, yaw_rad, None, None, None)
+            if control_rejected:
+                return ActionResult(
+                    failed=True,
+                    reason=control_rejection,
+                    detail=detail,
+                )
+            return ActionResult(
+                reason="control_not_allowed_pending",
+                detail=detail,
+            )
+        self._clear_control_rejection_if_explicitly_allowed(context_data)
+        if self._control_rejection_exceeded(now_monotonic):
+            detail = self._detail(target, yaw_rad, None, None, None)
+            return ActionResult(
+                failed=True,
+                reason=self.control_reject_reason or "control_not_allowed",
+                detail=detail,
+            )
         current = self._current_global_position(context_data)
         if current is None:
             return ActionResult(
@@ -115,8 +189,28 @@ class GotoWaypointAction(ActionModule):
         distance = self._gps_distance_m(current["lat"], current["lon"], target["lat"], target["lon"])
         z_error = abs(current["alt"] - target["alt"])
         velocity = self._velocity_status(context_data)
-        reached = distance <= self.tolerance_xy_m and z_error <= self.tolerance_z_m and velocity["velocity_gate_passed"]
-        self.reached_updates = self.reached_updates + 1 if reached else 0
+        position_gate_passed = (
+            distance <= self.tolerance_xy_m and z_error <= self.tolerance_z_m
+        )
+        velocity_gate_passed = bool(velocity["velocity_gate_passed"])
+        position_within_hysteresis = (
+            distance <= self.tolerance_xy_m + self.position_hysteresis_xy_m
+            and z_error <= self.tolerance_z_m + self.position_hysteresis_z_m
+        )
+        velocity_within_hysteresis = self._velocity_within_hysteresis(velocity)
+        if position_gate_passed and velocity_gate_passed:
+            self.reached_updates += 1
+            self.reached_update_action = "increment"
+        elif position_within_hysteresis and velocity_within_hysteresis:
+            self.reached_updates = max(
+                0, self.reached_updates - self.reached_updates_decrement
+            )
+            self.reached_update_action = (
+                "hold" if self.reached_updates_decrement == 0 else "decrement"
+            )
+        else:
+            self.reached_updates = 0
+            self.reached_update_action = "reset"
         detail = self._detail(target, yaw_rad, current, distance, z_error, velocity)
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
@@ -135,10 +229,43 @@ class GotoWaypointAction(ActionModule):
         self.altitude_m = self.field_yaw_deg = 0.0
         self.yaw_mode = "hold"
         self.hold_yaw_rad: float | None = None
-        self.tolerance_xy_m = self.tolerance_z_m = 0.3
+        self.tolerance_xy_m = self.tolerance_z_m = 0.30
         self.min_hold_updates, self.require_velocity_valid = 1, False
-        self.max_horizontal_speed_mps, self.max_vertical_speed_mps = 0.15, 0.10
+        self.max_horizontal_speed_mps, self.max_vertical_speed_mps = 0.25, 0.15
+        self.position_hysteresis_xy_m, self.position_hysteresis_z_m = 0.20, 0.10
+        self.horizontal_speed_hysteresis_mps = 0.10
+        self.vertical_speed_hysteresis_mps = 0.05
+        self.reached_updates_decrement = 1
+        self.reached_update_action = "reset"
+        self.control_reject_max_updates = 3
+        self.control_reject_timeout_s = 1.0
+        self.control_reject_count = 0
+        self.control_reject_started_monotonic = None
+        self.control_reject_reason = None
+        self.control_reject_elapsed_s = 0.0
+        self.max_duration_s = 180.0
+        self.started_monotonic = None
+        self.last_now_monotonic: float | None = None
         self.priority, self.key, self.reached_updates = 4, "goto_field_gps", 0
+
+    def observe_dispatch_rejection(
+        self, reason: str, *, now_monotonic: float | None = None
+    ) -> None:
+        """Record a dispatcher control rejection for the next lifecycle tick.
+
+        Telemetry usually reflects a mode loss first, but this also covers the
+        short interval where the dispatcher rejects a global goto before that
+        state publication reaches the Action context.
+        """
+        if reason not in {
+            "control_not_allowed",
+            "flight_mode_not_guided",
+            "guided_mode_lost",
+        }:
+            return
+        self._record_control_rejection(
+            reason, time.monotonic() if now_monotonic is None else now_monotonic
+        )
 
     def _field_reference(self, context: dict[str, Any]) -> FieldReference | None:
         if not bool(context.get("field_heading_confirmed")) or not bool(context.get("field_origin_gps_confirmed")):
@@ -199,8 +326,27 @@ class GotoWaypointAction(ActionModule):
             "hold_yaw_deg": None if self.hold_yaw_rad is None else math.degrees(self.hold_yaw_rad) % 360.0,
             "actual_yaw_deg": None if yaw_rad is None else math.degrees(yaw_rad) % 360.0,
             "actual_yaw_rad": yaw_rad,
+            "requested_target": self._target_summary(),
+            "active_target": self._target_summary(),
             "global_target": target, "current": current, "distance_xy_m": distance, "z_error_m": z_error,
-            "reached_updates": self.reached_updates, "min_hold_updates": self.min_hold_updates, **(velocity or {}),
+            "position_gate_passed": (
+                distance is not None and z_error is not None
+                and distance <= self.tolerance_xy_m and z_error <= self.tolerance_z_m
+            ),
+            "reached_updates": self.reached_updates, "min_hold_updates": self.min_hold_updates,
+            "reached_update_action": self.reached_update_action,
+            "position_hysteresis_xy_m": self.position_hysteresis_xy_m,
+            "position_hysteresis_z_m": self.position_hysteresis_z_m,
+            "horizontal_speed_hysteresis_mps": self.horizontal_speed_hysteresis_mps,
+            "vertical_speed_hysteresis_mps": self.vertical_speed_hysteresis_mps,
+            "control_reject_count": self.control_reject_count,
+            "control_reject_max_updates": self.control_reject_max_updates,
+            "control_reject_timeout_s": self.control_reject_timeout_s,
+            "control_reject_elapsed_s": self.control_reject_elapsed_s,
+            "control_reject_reason": self.control_reject_reason,
+            "elapsed_s": self._elapsed_s(),
+            "max_duration_s": self.max_duration_s,
+            **(velocity or {}),
         }
 
     def _velocity_status(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +363,85 @@ class GotoWaypointAction(ActionModule):
         passed = not self.require_velocity_valid or bool(valid and horizontal is not None and vertical is not None and horizontal <= self.max_horizontal_speed_mps and vertical <= self.max_vertical_speed_mps)
         return {"velocity_required": self.require_velocity_valid, "velocity_valid": valid,
                 "horizontal_speed_mps": horizontal, "vertical_speed_mps": vertical, "velocity_gate_passed": passed}
+
+    def _velocity_within_hysteresis(self, velocity: dict[str, Any]) -> bool:
+        if not self.require_velocity_valid:
+            return True
+        horizontal = velocity.get("horizontal_speed_mps")
+        vertical = velocity.get("vertical_speed_mps")
+        return bool(
+            velocity.get("velocity_valid")
+            and horizontal is not None
+            and vertical is not None
+            and float(horizontal) <= self.max_horizontal_speed_mps + self.horizontal_speed_hysteresis_mps
+            and float(vertical) <= self.max_vertical_speed_mps + self.vertical_speed_hysteresis_mps
+        )
+
+    def _target_summary(self) -> dict[str, Any]:
+        target: dict[str, Any] = {"alt_m": self.altitude_m}
+        if self.input_kind == "resolved_gps":
+            target.update({"lat": self.lat, "lon": self.lon})
+        elif self.input_kind == "field":
+            target.update({"field_x_m": self.field_x_m, "field_y_m": self.field_y_m})
+        return target
+
+    @staticmethod
+    def _context_monotonic(context: dict[str, Any]) -> float:
+        value = context.get("now_monotonic")
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return time.monotonic()
+        return result if math.isfinite(result) else time.monotonic()
+
+    @staticmethod
+    def _control_rejection(context: dict[str, Any]) -> str | None:
+        drone = context.get("drone")
+        if not isinstance(drone, dict):
+            return None
+        if drone.get("control_allowed") is False:
+            return "control_not_allowed"
+        mode = drone.get("mode")
+        if mode is not None and str(mode).strip().upper() != "GUIDED":
+            return "guided_mode_lost"
+        return None
+
+    def _clear_control_rejection_if_explicitly_allowed(self, context: dict[str, Any]) -> None:
+        drone = context.get("drone")
+        if not isinstance(drone, dict):
+            return
+        if drone.get("control_allowed") is True and str(drone.get("mode", "")).strip().upper() == "GUIDED":
+            self.control_reject_count = 0
+            self.control_reject_started_monotonic = None
+            self.control_reject_reason = None
+            self.control_reject_elapsed_s = 0.0
+
+    def _record_control_rejection(self, reason: str, now_monotonic: float) -> bool:
+        if self.control_reject_started_monotonic is None:
+            self.control_reject_started_monotonic = now_monotonic
+        self.control_reject_count += 1
+        self.control_reject_reason = reason
+        self.control_reject_elapsed_s = max(
+            0.0, now_monotonic - self.control_reject_started_monotonic
+        )
+        return self._control_rejection_exceeded(now_monotonic)
+
+    def _control_rejection_exceeded(self, now_monotonic: float) -> bool:
+        if self.control_reject_count <= 0:
+            return False
+        started = self.control_reject_started_monotonic
+        elapsed = 0.0 if started is None else max(0.0, now_monotonic - started)
+        self.control_reject_elapsed_s = elapsed
+        return (
+            self.control_reject_count >= self.control_reject_max_updates
+            or elapsed >= self.control_reject_timeout_s
+        )
+
+    def _elapsed_s(self) -> float:
+        if self.started_monotonic is None:
+            return 0.0
+        now = time.monotonic() if self.last_now_monotonic is None else self.last_now_monotonic
+        return max(0.0, now - self.started_monotonic)
 
     @staticmethod
     def _current_global_position(context: dict[str, Any]) -> dict[str, float] | None:

@@ -843,6 +843,14 @@ class ActionDispatcher:
         self.last_dispatch = self.empty_dispatch()
         self.last_servo_command = None
 
+    def release_action_keys(self) -> None:
+        """Release deduplication keys when an Action reaches any terminal state.
+
+        Keep ``last_dispatch`` intact so Action Lab and the cycle log retain
+        the final result while the active-action registry is already clean.
+        """
+        self.dispatched_keys.clear()
+
     def set_authorization(self, authorization: RunAuthorization | None) -> None:
         previous = self.authorization
         if previous is not None and (

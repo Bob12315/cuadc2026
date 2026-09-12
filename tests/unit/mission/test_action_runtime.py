@@ -210,7 +210,7 @@ def test_switch_running_action_stops_old_action_and_clears_navigation() -> None:
     service.start("first", link_manager=link)
     service.start("second", link_manager=link)
 
-    assert action_events == ["first.start", "first.stop", "second.start"]
+    assert action_events == ["first.start", "first.stop", "first.reset", "second.start"]
     assert link_events == [
         "stop_body_velocity_and_clear",
         "clear_pending_local_position_actions",

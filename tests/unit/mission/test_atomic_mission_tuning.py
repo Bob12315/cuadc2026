@@ -48,7 +48,7 @@ def test_capture_camera_and_recon_routes_are_preserved() -> None:
     assert len(cameras) == 4
     assert all((camera["fov_x_deg"], camera["fov_y_deg"]) == (114.591559, 98.864783) for camera in cameras)
     scan_holds = [step["params"]["min_hold_updates"] for step in drop if step.get("label", "").startswith("drop_scan_goto_")]
-    assert scan_holds == [8, 8, 8, 8]
+    assert scan_holds == [4, 4, 4, 4]
     recon = _steps("recon_gps.json")
     points = [(step["params"]["x"], step["params"]["y"], step["params"]["altitude_m"])
               for step in recon if step.get("label", "").startswith("recon_scan_goto_")]

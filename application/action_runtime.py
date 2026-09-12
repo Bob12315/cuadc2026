@@ -41,19 +41,55 @@ class ActionRuntimeService:
         clear_navigation: bool = True,
     ):
         link_manager = link_manager or self.dispatcher.command_port
+        preempted: dict[str, object] | None = None
+        if self.runner.state == "running" and self.runner.action_name:
+            active_name = self.runner.action_name
+            # A same-type goto is a navigation target replacement, not an
+            # attempt to start a second Action.  Other same-type Actions keep
+            # the historic action_already_running behaviour.
+            if active_name == action_name == "goto_waypoint":
+                old_action_id = self.runner.action_id
+                old_target = dict(self.runner.active_target or {})
+                cancelled = self.runner.stop(reason="superseded_by_new_goto")
+                preempted = {
+                    "old_action_id": old_action_id,
+                    "old_target": old_target,
+                    "new_target": self._target_summary(params),
+                    "preempt_reason": "superseded_by_new_goto",
+                    "old_lifecycle_state": cancelled.detail.get("lifecycle_state"),
+                }
+                _log.info(
+                    "goto preempted old_action_id=%s old_target=%s new_target=%s reason=%s",
+                    old_action_id,
+                    old_target,
+                    preempted["new_target"],
+                    "superseded_by_new_goto",
+                )
+            elif active_name != action_name:
+                # Preserve the existing Action Lab switch behaviour for
+                # distinct action classes.
+                self.runner.stop()
+            else:
+                result = self.runner.start(action_name, dict(params or {}))
+                self.last_result = result.to_dict()
+                return result
         if clear_navigation:
             self.clear_navigation_queue(link_manager)
-        # Switch-running action: stop the current one first.
-        if (
-            self.runner.state == "running"
-            and self.runner.action_name
-            and self.runner.action_name != action_name
-        ):
-            self.runner.stop()
         self.dispatcher.reset_keys()
         self.dispatcher.last_dispatch = self.dispatcher.empty_dispatch()
         self.dispatcher.last_servo_command = None
         result = self.runner.start(action_name, dict(params or {}))
+        if preempted is not None:
+            detail = dict(result.detail)
+            detail["preempted_action"] = preempted
+            result = type(result)(
+                effects=result.effects,
+                done=result.done,
+                failed=result.failed,
+                reason=result.reason,
+                output=result.output,
+                detail=detail,
+            )
         # MissionOrchestrator consumes ``last_result`` on its next tick.  The
         # start result must replace any result left by the preceding Action;
         # otherwise a failed start can leave a stale success visible and
@@ -71,17 +107,29 @@ class ActionRuntimeService:
         link_manager = link_manager or self.dispatcher.command_port
         if self.runner.state != "running":
             return self.runner.status()
+        active_name = self.runner.action_name
         result = self.runner.update(context)
         result_dict = result.to_dict()
         self.last_result = result_dict
-        if result.failed and self.runner.action_name == "goto_waypoint":
+        if active_name == "goto_waypoint" and result.failed:
             self.clear_navigation_queue(link_manager, hold_current=True)
         self.dispatcher.last_dispatch = self.dispatcher.dispatch_result(
             result,
-            action_name=self.runner.action_name,
+            action_name=active_name,
             link_manager=link_manager,
             send_commands=send_commands,
         )
+        if active_name == "goto_waypoint" and self.runner.state == "running":
+            self._record_goto_dispatch_rejections()
+        if self.runner.state in {"succeeded", "failed", "cancelled"}:
+            self.dispatcher.release_action_keys()
+            _log.info(
+                "action terminal cleanup action=%s state=%s reason=%s active_action_cleared=%s",
+                active_name,
+                self.runner.state,
+                result.reason,
+                self.runner.current_action is None,
+            )
         return self.runner.status()
 
     def stop(self, link_manager: object | None = None, *, hold_current: bool = False):
@@ -89,7 +137,17 @@ class ActionRuntimeService:
         link_manager = link_manager or self.dispatcher.command_port
         self.clear_navigation_queue(link_manager, hold_current=hold_current)
         self.dispatcher.last_dispatch = self.dispatcher.empty_dispatch()
-        return self.runner.stop()
+        result = self.runner.stop()
+        self.last_result = result.to_dict()
+        if self.runner.state in {"succeeded", "failed", "cancelled"}:
+            self.dispatcher.release_action_keys()
+            _log.info(
+                "action terminal cleanup action=cancelled state=%s reason=%s active_action_cleared=%s",
+                self.runner.state,
+                result.reason,
+                self.runner.current_action is None,
+            )
+        return result
 
     def reset(self, link_manager: object | None = None, *, hold_current: bool = False):
         """Reset the runtime and optionally hold current position."""
@@ -175,3 +233,40 @@ class ActionRuntimeService:
             action_name=self.runner.action_name,
             send_commands=send_commands,
         )
+
+    def _record_goto_dispatch_rejections(self) -> None:
+        """Relay a safety-pipeline control rejection into goto lifecycle.
+
+        State telemetry is normally sufficient, but the dispatcher can know
+        about a rejected GLOBAL_GOTO one tick earlier.  This closes that gap
+        without coupling the Action directly to LinkManager or MAVLink.
+        """
+        action = self.runner.current_action
+        observer = getattr(action, "observe_dispatch_rejection", None)
+        if not callable(observer):
+            return
+        for skipped in self.dispatcher.last_dispatch.get("skipped", []):
+            reason = str(skipped.get("reason") or "")
+            if reason in {
+                "control_not_allowed",
+                "flight_mode_not_guided",
+                "guided_mode_lost",
+            }:
+                observer(reason)
+
+    @staticmethod
+    def _target_summary(params: dict[str, object] | None) -> dict[str, object]:
+        data = dict(params or {})
+        target = data.get("target")
+        source = target if isinstance(target, dict) else data
+        result: dict[str, object] = {}
+        for key, legacy in (("field_x_m", "x"), ("field_y_m", "y")):
+            value = source.get(key, source.get(legacy))
+            if value is not None:
+                result[key] = value
+        for key in ("lat", "lon"):
+            if source.get(key) is not None:
+                result[key] = source[key]
+        if data.get("altitude_m") is not None:
+            result["alt_m"] = data["altitude_m"]
+        return result

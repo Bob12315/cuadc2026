@@ -124,7 +124,7 @@ def test_action_runner_normal_lifecycle() -> None:
     second = runner.update({"tick": 2})
 
     assert start.failed is False
-    assert runner.status()["state"] == "done"
+    assert runner.status()["state"] == "succeeded"
     assert first.actions[0]["params"]["track_id"] == 1
     assert second.done is True
     assert second.actions[0]["params"]["track_id"] == 2

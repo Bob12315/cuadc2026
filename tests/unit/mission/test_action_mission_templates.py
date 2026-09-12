@@ -46,9 +46,9 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         scan_goto = steps[capture_index - 1]
         assert scan_goto["name"] == "goto_waypoint"
         assert scan_goto["params"]["require_velocity_valid"] is True
-        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
-        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
-        assert scan_goto["params"]["min_hold_updates"] == 8
+        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.25
+        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.15
+        assert scan_goto["params"]["min_hold_updates"] == 4
     releases = [step for step in steps if step["name"] == "payload_release"]
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
     assert [step["params"]["servo_outputs"] for step in releases] == [
@@ -98,9 +98,9 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
         scan_goto = steps[capture_index - 1]
         assert scan_goto["name"] == "goto_waypoint"
         assert scan_goto["params"]["require_velocity_valid"] is True
-        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
-        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
-        assert scan_goto["params"]["min_hold_updates"] == 8
+        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.25
+        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.15
+        assert scan_goto["params"]["min_hold_updates"] == 4
 
 
 def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> None:
