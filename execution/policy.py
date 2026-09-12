@@ -86,6 +86,11 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_run_authorization=True,
         requires_send_commands=True,
     ),
+    "condition_yaw": DispatchRule(
+        allowed_actions={"takeoff"},
+        requires_run_authorization=True,
+        requires_send_commands=True,
+    ),
     "land": DispatchRule(
         allowed_actions={"land"},
         requires_run_authorization=True,

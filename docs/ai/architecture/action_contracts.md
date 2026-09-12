@@ -43,6 +43,14 @@ Action Lab 说明、Action Mission JSON、validator 和回归测试。
 FIELD 航点必须经过唯一的 `field/coordinates.py` 进行转换；未确认
 Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 
+## 起飞后的固定场地朝向
+
+`takeoff` 默认在高度门槛达到后，发送绝对 `condition_yaw` 并等待稳定的
+偏航遥测，直到机头朝向 `FIELD +Y`（`yaw_mode=field_heading`、
+`field_yaw_deg=0.0`）。默认容差为 5°、连续 2 个遥测更新、偏航阶段超时为
+12 秒。字段朝向尚未确认时，Action 会在切换模式或解锁前以
+`field_heading_not_ready` 失败；`yaw_mode=hold` 是唯一保留原行为的显式兼容选项。
+
 ## 速度切换契约
 
 航点阶段的地速切换只能走正式发送链：

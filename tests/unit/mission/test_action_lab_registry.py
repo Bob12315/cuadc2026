@@ -87,3 +87,4 @@ def test_action_lab_does_not_mutate_default_registry() -> None:
 
 def test_goto_waypoint_global_dispatch_policy_enabled() -> None:
     assert "goto_waypoint" in ACTION_DISPATCH_POLICY["global_goto"].allowed_actions
+    assert "takeoff" in ACTION_DISPATCH_POLICY["condition_yaw"].allowed_actions

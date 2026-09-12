@@ -16,6 +16,13 @@ class _AltitudeSample:
 
 
 class TakeoffAction(ActionModule):
+    """Arm, climb, then face the configured fixed FIELD heading.
+
+    FIELD +Y is the agreed field-centre direction.  ``yaw_mode=hold`` remains
+    an explicit compatibility option for callers that deliberately do not want
+    the final heading-alignment phase.
+    """
+
     def __init__(self) -> None:
         self.reset()
 
@@ -45,6 +52,24 @@ class TakeoffAction(ActionModule):
         self.require_armed = self._parse_bool(data.get("require_armed", True), "require_armed")
         self.max_updates = max_updates
         self.max_duration_s = max_duration_s
+        self.yaw_mode = str(data.get("yaw_mode") or "field_heading").strip().lower()
+        if self.yaw_mode not in {"field_heading", "hold"}:
+            raise ValueError("yaw_mode must be 'field_heading' or 'hold'")
+        self.field_yaw_deg = self._finite_required(
+            data.get("field_yaw_deg", data.get("yaw_deg", 0.0)), "field_yaw_deg"
+        )
+        self.yaw_tolerance_deg = self._positive_finite(
+            data.get("yaw_tolerance_deg", 5.0), "yaw_tolerance_deg"
+        )
+        if self.yaw_tolerance_deg > 180.0:
+            raise ValueError("yaw_tolerance_deg must be <= 180")
+        self.yaw_min_hold_updates = max(1, int(data.get("yaw_min_hold_updates", 2)))
+        self.yaw_timeout_s = self._positive_finite(
+            data.get("yaw_timeout_s", 12.0), "yaw_timeout_s"
+        )
+        self.yaw_speed_deg_s = self._positive_finite(
+            data.get("yaw_speed_deg_s", 20.0), "yaw_speed_deg_s"
+        )
         self.started_monotonic_s = time.monotonic()
         self.priority = int(data.get("priority", 2))
         self.arm_priority = int(data.get("arm_priority", 1))
@@ -61,6 +86,10 @@ class TakeoffAction(ActionModule):
         self.mode_sent = False
         self.arm_sent = False
         self.takeoff_sent = False
+        self.yaw_sent = False
+        self.yaw_reached_updates = 0
+        self.yaw_target_rad: float | None = None
+        self.yaw_alignment_started_monotonic_s: float | None = None
         self.last_detail = self._detail()
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
@@ -70,6 +99,19 @@ class TakeoffAction(ActionModule):
             return ActionResult(done=True, reason="stopped", detail=self._detail())
         if self.done:
             return ActionResult(done=True, reason="takeoff_done", detail=dict(self.last_detail))
+
+        if self.yaw_mode == "field_heading" and self.yaw_target_rad is None:
+            target_yaw = self._field_heading_target(context or {})
+            if target_yaw is None:
+                self.phase = "failed"
+                self.failed = True
+                self.failure_reason = "field_heading_not_ready"
+                detail = self._detail(context=context)
+                self.last_detail = detail
+                return ActionResult(
+                    failed=True, reason="field_heading_not_ready", detail=detail
+                )
+            self.yaw_target_rad = target_yaw
 
         self.update_count += 1
         context_data = context or {}
@@ -140,10 +182,17 @@ class TakeoffAction(ActionModule):
             detail = self._detail(altitude, reached=reached, context=context_data)
             self.last_detail = detail
             if reached:
-                self.done = True
-                self.phase = "done"
-                return ActionResult(done=True, reason="takeoff_altitude_reached", detail=detail)
+                if self.yaw_mode == "hold":
+                    self.done = True
+                    self.phase = "done"
+                    return ActionResult(done=True, reason="takeoff_altitude_reached", detail=detail)
+                self.phase = "align_yaw"
+                self.yaw_alignment_started_monotonic_s = time.monotonic()
+                return self._align_yaw_result(altitude, context_data)
             return ActionResult(reason="waiting_for_takeoff_altitude", detail=detail)
+
+        if self.phase == "align_yaw":
+            return self._align_yaw_result(altitude, context_data)
 
         return ActionResult(failed=True, reason="invalid_takeoff_phase", detail=self._detail(altitude, context=context_data))
 
@@ -161,12 +210,22 @@ class TakeoffAction(ActionModule):
         self.mode_sent = False
         self.arm_sent = False
         self.takeoff_sent = False
+        self.yaw_sent = False
+        self.yaw_reached_updates = 0
+        self.yaw_target_rad: float | None = None
+        self.yaw_alignment_started_monotonic_s: float | None = None
         self.mode = "GUIDED"
         self.altitude_m = 3.0
         self.altitude_tolerance_m = 0.3
         self.require_armed = True
         self.max_updates = 120
         self.max_duration_s: float | None = None
+        self.yaw_mode = "field_heading"
+        self.field_yaw_deg = 0.0
+        self.yaw_tolerance_deg = 5.0
+        self.yaw_min_hold_updates = 2
+        self.yaw_timeout_s = 12.0
+        self.yaw_speed_deg_s = 20.0
         self.started_monotonic_s: float | None = None
         self.takeoff_started_monotonic_s: float | None = None
         self.priority = 2
@@ -189,6 +248,71 @@ class TakeoffAction(ActionModule):
         self.last_detail = detail
         self.phase = "wait_altitude"
         return ActionResult(effects=ActionResult.typed([action]), reason="takeoff_sent", detail=detail)
+
+    def _align_yaw_result(
+        self,
+        altitude: _AltitudeSample | None,
+        context: dict[str, Any],
+    ) -> ActionResult:
+        """Turn once toward FIELD +Y and wait for stable attitude telemetry."""
+        target_yaw = self.yaw_target_rad
+        if target_yaw is None:
+            self.phase = "failed"
+            self.failed = True
+            self.failure_reason = "field_heading_not_ready"
+            detail = self._detail(altitude, context=context)
+            self.last_detail = detail
+            return ActionResult(failed=True, reason="field_heading_not_ready", detail=detail)
+
+        now = time.monotonic()
+        if self.yaw_alignment_started_monotonic_s is None:
+            self.yaw_alignment_started_monotonic_s = now
+        if now - self.yaw_alignment_started_monotonic_s >= self.yaw_timeout_s:
+            self.phase = "failed"
+            self.failed = True
+            self.failure_reason = "field_heading_yaw_timeout"
+            detail = self._detail(altitude, context=context)
+            self.last_detail = detail
+            return ActionResult(
+                failed=True, reason="field_heading_yaw_timeout", detail=detail
+            )
+
+        current_yaw = self._current_yaw_rad(context)
+        if current_yaw is not None and self._yaw_error_deg(current_yaw, target_yaw) <= self.yaw_tolerance_deg:
+            self.yaw_reached_updates += 1
+            if self.yaw_reached_updates >= self.yaw_min_hold_updates:
+                self.done = True
+                self.phase = "done"
+                detail = self._detail(altitude, context=context)
+                self.last_detail = detail
+                return ActionResult(
+                    done=True, reason="takeoff_field_heading_reached", detail=detail
+                )
+        else:
+            self.yaw_reached_updates = 0
+
+        detail = self._detail(altitude, context=context)
+        self.last_detail = detail
+        if not self.yaw_sent:
+            self.yaw_sent = True
+            action = {
+                "action_type": "condition_yaw",
+                "params": {
+                    "yaw_deg": math.degrees(target_yaw) % 360.0,
+                    "yaw_speed_deg_s": self.yaw_speed_deg_s,
+                    "direction": 0,
+                    "relative": False,
+                },
+                "key": f"{self.key}_field_heading",
+                "once": True,
+                "priority": self.priority,
+            }
+            return ActionResult(
+                effects=ActionResult.typed([action]),
+                reason="field_heading_yaw_sent",
+                detail=detail,
+            )
+        return ActionResult(reason="waiting_for_field_heading_yaw", detail=detail)
 
     def _current_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
         for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
@@ -302,6 +426,17 @@ class TakeoffAction(ActionModule):
             "mode_sent": self.mode_sent,
             "arm_sent": self.arm_sent,
             "takeoff_sent": self.takeoff_sent,
+            "yaw_mode": self.yaw_mode,
+            "field_yaw_deg": self.field_yaw_deg,
+            "target_yaw_deg": None if self.yaw_target_rad is None else math.degrees(self.yaw_target_rad) % 360.0,
+            "current_yaw_deg": self._current_yaw_deg(context_data),
+            "yaw_error_deg": self._current_yaw_error_deg(context_data),
+            "yaw_tolerance_deg": self.yaw_tolerance_deg,
+            "yaw_reached_updates": self.yaw_reached_updates,
+            "yaw_min_hold_updates": self.yaw_min_hold_updates,
+            "yaw_sent": self.yaw_sent,
+            "yaw_timeout_s": self.yaw_timeout_s,
+            "yaw_alignment_elapsed_s": self._yaw_alignment_elapsed_s(),
         }
         for name in (
             "field_heading_confirmed",
@@ -335,6 +470,38 @@ class TakeoffAction(ActionModule):
         if yaw is not None:
             return yaw
         return None
+
+    def _field_heading_target(self, context: dict[str, Any]) -> float | None:
+        if context.get("field_heading_confirmed") is not True:
+            return None
+        heading = self._finite_float(context.get("field_heading_yaw_rad"))
+        if heading is None:
+            return None
+        return self._normalize_yaw(heading + math.radians(self.field_yaw_deg))
+
+    def _current_yaw_deg(self, context: dict[str, Any]) -> float | None:
+        yaw = self._current_yaw_rad(context)
+        return None if yaw is None else math.degrees(self._normalize_yaw(yaw)) % 360.0
+
+    def _current_yaw_error_deg(self, context: dict[str, Any]) -> float | None:
+        if self.yaw_target_rad is None:
+            return None
+        yaw = self._current_yaw_rad(context)
+        return None if yaw is None else self._yaw_error_deg(yaw, self.yaw_target_rad)
+
+    def _yaw_alignment_elapsed_s(self) -> float | None:
+        if self.yaw_alignment_started_monotonic_s is None:
+            return None
+        return max(0.0, time.monotonic() - self.yaw_alignment_started_monotonic_s)
+
+    @staticmethod
+    def _normalize_yaw(yaw_rad: float) -> float:
+        return float(yaw_rad) % math.tau
+
+    @staticmethod
+    def _yaw_error_deg(current_yaw_rad: float, target_yaw_rad: float) -> float:
+        error_rad = (float(current_yaw_rad) - float(target_yaw_rad) + math.pi) % math.tau - math.pi
+        return abs(math.degrees(error_rad))
 
     def _attitude_valid(self, context: dict[str, Any]) -> bool:
         drone = context.get("drone")
@@ -378,3 +545,17 @@ class TakeoffAction(ActionModule):
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
+
+    @classmethod
+    def _finite_required(cls, value: Any, name: str) -> float:
+        result = cls._finite_float(value)
+        if result is None:
+            raise ValueError(f"{name} must be finite")
+        return result
+
+    @classmethod
+    def _positive_finite(cls, value: Any, name: str) -> float:
+        result = cls._finite_required(value, name)
+        if result <= 0.0:
+            raise ValueError(f"{name} must be positive")
+        return result

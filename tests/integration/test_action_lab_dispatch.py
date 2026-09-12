@@ -62,6 +62,15 @@ def test_dispatcher_dispatches_takeoff():
     assert result.get("status") != "skipped" or "unsupported" not in str(result.get("reason", ""))
 
 
+def test_dispatcher_dispatches_condition_yaw():
+    dispatcher = ActionDispatcher(test_source="test")
+    result = dispatcher._dispatch_action(
+        {"action_type": "condition_yaw", "params": {"yaw_deg": 45.0}},
+        link_manager=None,
+    )
+    assert result.get("status") != "skipped" or "unsupported" not in str(result.get("reason", ""))
+
+
 def test_dispatcher_dispatches_land():
     """ActionDispatcher dispatches land."""
     dispatcher = ActionDispatcher(test_source="test")
@@ -87,15 +96,15 @@ def test_dispatcher_dispatches_body_velocity():
 
 
 # ---------------------------------------------------------------------------
-# TakeoffAction — no confirm_field_heading
+# TakeoffAction — FIELD heading is commanded only after reaching takeoff altitude
 # ---------------------------------------------------------------------------
 
 
 def test_takeoff_first_action_is_set_mode():
-    """TakeoffAction must emit set_mode as first action, not confirm_field_heading."""
+    """TakeoffAction must emit set_mode first; it must not use the removed confirmation Action."""
     action = TakeoffAction()
     action.start({"altitude_m": 3.0})
-    result = action.update({})
+    result = action.update({"field_heading_confirmed": True, "field_heading_yaw_rad": 0.0})
     assert result.reason == "set_mode_sent"
     assert len(result.actions) == 1
     assert result.actions[0]["action_type"] == "set_mode"

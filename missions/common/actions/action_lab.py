@@ -99,10 +99,11 @@ _SERVO_OUTPUT = {"type": "object", "required": ["channel", "release_pwm", "hold_
     "hold_pwm": {"type": "integer", "minimum": 500, "maximum": 2500},
 }, "additionalProperties": False}
 _DEFINITIONS = (
-    _definition("takeoff", TakeoffAction, "Arm and take off through the execution safety gates.",
-                {"mode": "GUIDED", "altitude_m": 4.5, "altitude_tolerance_m": 0.35, "require_armed": True, "max_updates": 150, "max_duration_s": 45, "priority": 2, "arm_priority": 1, "mode_priority": 2},
-                properties={"mode": {"type": "string", "enum": ["GUIDED"]}, "altitude_m": {"type": "number", "exclusiveMinimum": 0}, "altitude_tolerance_m": {"type": "number", "exclusiveMinimum": 0}, "max_updates": {"type": "integer", "minimum": 1}, "max_duration_s": {"type": ["number", "null"], "exclusiveMinimum": 0}, "require_armed": _BOOLEAN, "priority": _INTEGER, "arm_priority": _INTEGER, "mode_priority": _INTEGER, "key": _STRING},
-                required_inputs=("drone.mode", "drone.armed", "drone.relative_altitude"), effects=("set_mode", "arm", "takeoff")),
+    _definition("takeoff", TakeoffAction, "Arm, take off, then face FIELD +Y before completing.",
+                {"mode": "GUIDED", "altitude_m": 4.5, "altitude_tolerance_m": 0.35, "require_armed": True, "max_updates": 150, "max_duration_s": 45, "yaw_mode": "field_heading", "field_yaw_deg": 0.0, "yaw_tolerance_deg": 5.0, "yaw_min_hold_updates": 2, "yaw_timeout_s": 12.0, "yaw_speed_deg_s": 20.0, "priority": 2, "arm_priority": 1, "mode_priority": 2},
+                properties={"mode": {"type": "string", "enum": ["GUIDED"]}, "altitude_m": {"type": "number", "exclusiveMinimum": 0}, "altitude_tolerance_m": {"type": "number", "exclusiveMinimum": 0}, "max_updates": {"type": "integer", "minimum": 1}, "max_duration_s": {"type": ["number", "null"], "exclusiveMinimum": 0}, "yaw_mode": {"type": "string", "enum": ["field_heading", "hold"]}, "field_yaw_deg": _NUMBER, "yaw_deg": _NUMBER, "yaw_tolerance_deg": {"type": "number", "exclusiveMinimum": 0, "maximum": 180}, "yaw_min_hold_updates": {"type": "integer", "minimum": 1}, "yaw_timeout_s": {"type": "number", "exclusiveMinimum": 0}, "yaw_speed_deg_s": {"type": "number", "exclusiveMinimum": 0}, "require_armed": _BOOLEAN, "priority": _INTEGER, "arm_priority": _INTEGER, "mode_priority": _INTEGER, "key": _STRING},
+                parameter_aliases={"field_yaw_deg": ("yaw_deg",)},
+                required_inputs=("drone.mode", "drone.armed", "drone.relative_altitude", "field_heading_yaw_rad"), effects=("set_mode", "arm", "takeoff", "condition_yaw")),
     _definition("land", LandAction, "Land through the execution safety gates.",
                 {"max_updates": 300, "priority": 2},
                 properties={"land_altitude_threshold_m": {"type": "number", "minimum": 0}, "max_updates": {"type": "integer", "minimum": 1}, "priority": _INTEGER, "key": _STRING}, required_inputs=("drone",), effects=("land",)),

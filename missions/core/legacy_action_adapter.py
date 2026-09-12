@@ -117,15 +117,21 @@ class LegacyActionModuleAdapter:
             output.setdefault("drone", {
                 "armed": vehicle.armed,
                 "mode": vehicle.mode,
+                "attitude_valid": vehicle.yaw_rad is not None and not vehicle.stale,
                 "local_position_valid": vehicle.local_valid,
                 "local_north_m": vehicle.local_north_m,
                 "local_east_m": vehicle.local_east_m,
                 "local_down_m": vehicle.local_down_m,
-                "yaw_rad": vehicle.yaw_rad,
+                "yaw": vehicle.yaw_rad,
                 "latitude": vehicle.latitude_deg,
                 "longitude": vehicle.longitude_deg,
+                "relative_altitude": vehicle.relative_altitude_m,
                 "relative_altitude_m": vehicle.relative_altitude_m,
             })
+        field = context.snapshot.field
+        if field is not None:
+            output.setdefault("field_heading_confirmed", bool(field.is_confirmed and field.is_frozen))
+            output.setdefault("field_heading_yaw_rad", field.field_heading_yaw_rad)
         perception = context.snapshot.perception
         if perception is not None:
             target = perception.target

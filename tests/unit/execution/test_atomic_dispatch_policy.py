@@ -12,6 +12,7 @@ def test_atomic_actions_own_the_minimum_required_capabilities() -> None:
         "set_mode": {"takeoff"},
         "arm": {"takeoff"},
         "takeoff": {"takeoff"},
+        "condition_yaw": {"takeoff"},
         "land": {"land"},
         "change_speed": {"change_speed"},
         "yolo_lock_target": {"target_lock", "gps_target_lock"},

@@ -11,7 +11,13 @@
         "altitude_m": 3.5,
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
-        "max_updates": 150
+        "max_updates": 150,
+        "yaw_mode": "field_heading",
+        "field_yaw_deg": 0,
+        "yaw_tolerance_deg": 5.0,
+        "yaw_min_hold_updates": 2,
+        "yaw_timeout_s": 12.0,
+        "yaw_speed_deg_s": 20.0
       },
       "on_failed": {
         "action": "continue"

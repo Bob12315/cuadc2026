@@ -8,7 +8,6 @@ from contracts.core.action import (
     ActionDefinition,
     ActionRegistration,
     EffectDispatchPolicy,
-    ExitBarrier,
     SchemaRef,
 )
 from contracts.core.common import ActionContractFingerprint, ActionDefinitionId
@@ -25,8 +24,6 @@ from .native_one_shot_actions import (
     output_codec,
     speed_factory,
     speed_params_codec,
-    takeoff_factory,
-    takeoff_params_codec,
 )
 
 
@@ -34,6 +31,7 @@ _EFFECT_KIND_BY_ACTION_EFFECT = {
     "set_mode": EffectKind.SET_FLIGHT_MODE,
     "arm": EffectKind.ARM,
     "takeoff": EffectKind.TAKEOFF,
+    "condition_yaw": EffectKind.CONDITION_YAW,
     "land": EffectKind.LAND,
     "change_speed": EffectKind.CHANGE_SPEED,
     "global_goto": EffectKind.GLOBAL_POSITION_TARGET,
@@ -44,7 +42,6 @@ _EFFECT_KIND_BY_ACTION_EFFECT = {
 
 
 _NATIVE_ONE_SHOT = {
-    "takeoff": (takeoff_factory, takeoff_params_codec),
     "land": (land_factory, empty_params_codec),
     "change_speed": (speed_factory, speed_params_codec),
 }
