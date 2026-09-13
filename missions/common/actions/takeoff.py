@@ -20,7 +20,7 @@ class _AltitudeSample:
 
 
 class TakeoffAction(ActionModule):
-    """Arm, command takeoff, then lock the fixed FIELD-centre heading.
+    """Arm, climb vertically, then lock the fixed FIELD-centre heading.
 
     FIELD +Y is the agreed field-centre direction.  ``yaw_mode=hold`` remains
     an explicit compatibility option for callers that deliberately do not want
@@ -262,32 +262,33 @@ class TakeoffAction(ActionModule):
         altitude: _AltitudeSample | None,
         context: dict[str, Any],
     ) -> ActionResult:
-        """Hold one resolved yaw throughout the climb and finish at altitude."""
+        """Finish the vertical climb before starting the one-shot yaw lock."""
+        if altitude is None:
+            detail = self._detail(None, context=context)
+            self.last_detail = detail
+            return ActionResult(reason="waiting_for_altitude", detail=detail)
+
+        reached_altitude = altitude.value_m >= self.altitude_m - self.altitude_tolerance_m
+        if not reached_altitude:
+            detail = self._detail(altitude, reached=False, context=context)
+            self.last_detail = detail
+            return ActionResult(reason="waiting_for_takeoff_altitude", detail=detail)
+
+        # MAV_CMD_NAV_TAKEOFF intentionally owns the entire climb.  Do not
+        # command yaw until its altitude gate has passed, so the aircraft
+        # rises vertically at its existing heading before turning to FIELD +Y.
         if self.yaw_mode == "field_heading":
             yaw_result = self._update_yaw_lock(altitude, context)
             if yaw_result is not None:
                 return yaw_result
 
-        if altitude is None:
-            detail = self._detail(None, context=context)
-            self.last_detail = detail
-            return ActionResult(
-                reason=(
-                    "waiting_for_field_heading_yaw"
-                    if self.yaw_mode == "field_heading" and self.yaw_reached_updates < self.yaw_min_hold_updates
-                    else "waiting_for_altitude"
-                ),
-                detail=detail,
-            )
-
-        reached_altitude = altitude.value_m >= self.altitude_m - self.altitude_tolerance_m
         yaw_reached = (
             self.yaw_mode == "hold"
             or self.yaw_reached_updates >= self.yaw_min_hold_updates
         )
         detail = self._detail(altitude, reached=reached_altitude, context=context)
         self.last_detail = detail
-        if reached_altitude and yaw_reached:
+        if yaw_reached:
             self.done = True
             self.phase = "done"
             reason = (
@@ -302,10 +303,6 @@ class TakeoffAction(ActionModule):
                 self.yaw_source,
             )
             return ActionResult(done=True, reason=reason, detail=detail)
-        if not reached_altitude and self.yaw_mode == "field_heading" and not yaw_reached:
-            return ActionResult(reason="waiting_for_takeoff_altitude_and_field_heading", detail=detail)
-        if not reached_altitude:
-            return ActionResult(reason="waiting_for_takeoff_altitude", detail=detail)
         return ActionResult(reason="waiting_for_field_heading_yaw", detail=detail)
 
     def _update_yaw_lock(
