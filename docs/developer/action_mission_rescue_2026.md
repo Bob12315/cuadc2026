@@ -51,28 +51,28 @@ takeoff
 | # | label | Action | 失败策略 |
 | ---: | --- | --- | --- |
 | 1 | `takeoff_4_5m` | `takeoff` | `continue` |
-| 2, 4, 6, 8 | `drop_scan_goto_1..4` | `goto_waypoint` | `continue` |
-| 3, 5, 7, 9 | `drop_scan_capture_1..4` | `gps_capture_view` | `continue` |
-| 10 | `drop_scan_fuse` | `gps_fuse_views` | `continue` |
-| 11 | `select_gps_drop_targets` | `select_drop_targets` | `continue` |
-| 12 | `drop_speed_1mps` | `change_speed` | `continue` |
-| 13 | `drop_1_approach` | `goto_waypoint` | `continue` |
-| 14 | `drop_1_align` | `align_descend` | `continue` |
-| 15 | `drop_1_release` | `payload_release`（后方 SERVO8 1800→1370） | `continue` |
-| 16 | `drop_1_climb` | `goto_waypoint` | `continue` |
-| 17 | `drop_2_approach` | `goto_waypoint` | `continue` |
-| 18 | `drop_2_align` | `align_descend` | `continue` |
-| 19 | `drop_2_release` | `payload_release`（前方 SERVO9 1745→1325） | `continue` |
-| 20 | `drop_2_climb` | `goto_waypoint` | `continue` |
-| 21 | `restore_transition_speed_2mps` | `change_speed` | `continue` |
-| 22 | `recon_speed_1mps` | `change_speed` | `continue` |
-| 23 | `goto_recon_entry_4m` | `goto_waypoint` | `continue` |
-| 24–28 | `recon_scan_goto_1..5` | `goto_waypoint` | `continue` |
-| 29 | `restore_return_speed_2mps` | `change_speed` | `continue` |
-| 30 | `return_home_gps` | `goto_waypoint` | `continue` |
-| 31 | `descend_home_2_5m` | `goto_waypoint` | `continue` |
-| 32 | `final_land_align` | `align_descend` | `continue` |
-| 33 | `land_home` | `land` | `continue` |
+| 2 | `goto_drop_center_4_5m` | `goto_waypoint` | `continue` |
+| 3 | `drop_scan_capture` | `gps_capture_view` | `continue` |
+| 4 | `drop_scan_fuse` | `gps_fuse_views` | `continue` |
+| 5 | `select_gps_drop_targets` | `select_drop_targets` | `continue` |
+| 6 | `drop_speed_1mps` | `change_speed` | `continue` |
+| 7 | `drop_1_approach` | `goto_waypoint` | `continue` |
+| 8 | `drop_1_align` | `align_descend` | `continue` |
+| 9 | `drop_1_release` | `payload_release`（后方 SERVO8 1800→1370） | `continue` |
+| 10 | `drop_1_climb` | `goto_waypoint` | `continue` |
+| 11 | `drop_2_approach` | `goto_waypoint` | `continue` |
+| 12 | `drop_2_align` | `align_descend` | `continue` |
+| 13 | `drop_2_release` | `payload_release`（前方 SERVO9 1745→1325） | `continue` |
+| 14 | `drop_2_climb` | `goto_waypoint` | `continue` |
+| 15 | `restore_transition_speed_2mps` | `change_speed` | `continue` |
+| 16 | `recon_speed_1mps` | `change_speed` | `continue` |
+| 17 | `goto_recon_entry_4m` | `goto_waypoint` | `continue` |
+| 18–22 | `recon_scan_goto_1..5` | `goto_waypoint` | `continue` |
+| 23 | `restore_return_speed_2mps` | `change_speed` | `continue` |
+| 24 | `return_home_gps` | `goto_waypoint` | `continue` |
+| 25 | `descend_home_2_5m` | `goto_waypoint` | `continue` |
+| 26 | `final_land_align` | `align_descend` | `continue` |
+| 27 | `land_home` | `land` | `continue` |
 
 ## 模板定位
 
@@ -126,7 +126,7 @@ RC override。
 
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
-| 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
+| 投放区中心单视角粗定位 | 飞至 FIELD `(0, 32.5)`、4.5 m 后运行一次 `gps_capture_view`，从当前广角 YOLO `scene.detections` 与捕获时 GPS/yaw/高度计算每个筒的粗 GPS；随后 `gps_fuse_views` 与 `select_drop_targets` 按筒类别得分和空间去重选择最多两个目标。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
 | 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
 | 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放同时控制后方 SERVO8、前方 SERVO9；两个目标时分别控制 SERVO8、SERVO9，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
@@ -166,7 +166,7 @@ Mission 步骤可用 `save_as` 保存 `ActionResult.output`，后续参数使用
 读取。当前 v2 投放主线的主要数据流是：
 
 ```text
-gps_capture_view save_as drop_scan_view_1..4
+gps_capture_view save_as drop_scan_view
   → gps_fuse_views save_as drop_scan
   → drop_scan.localized_objects
 
@@ -182,12 +182,13 @@ goto_waypoint（融合目标 GPS 上方）
   → payload_release save_as drop_release_1..2
 ```
 
-投放区融合除要求每个聚类至少 3 个有效观测外，还要求这些观测至少来自 3 个不同扫描
-航点，避免单一画面内的重复框满足融合门槛。融合输出携带的总权重会参与同类别目标的
-稳定排序。零目标时 `target_slots[0]` 是 FIELD `(0, 32.5)` 的中心回退点，飞机在 2.5 m
-高度直接同时投放两枚载荷。一个目标时第一槽使用融合 GPS，并在一次对准后同时投放两枚
-载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定 track，只使用飞机到达位置
-后的当前画面；投放计划只控制该步骤是否执行。
+投放区以中心单张广角画面进行粗定位：融合兼容单视角，聚类和来源航点门槛均为 1，
+并放宽画面边缘过滤。粗 GPS 只用于区分场上筒、以 1.0 m 空间去重避免同一筒占用两个
+槽位，以及导航至目标附近；广角边缘误差由后续近距离视觉对准投放处理。融合输出携带的
+总权重会参与同类别目标的稳定排序。零目标时 `target_slots[0]` 是 FIELD `(0, 32.5)` 的
+中心回退点，飞机在 2.5 m 高度直接同时投放两枚载荷。一个目标时第一槽使用融合 GPS，
+并在一次对准后同时投放两枚载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定
+track，只使用飞机到达位置后的当前画面；投放计划只控制该步骤是否执行。
 
 参数引用支持字典键和列表索引，例如：
 
