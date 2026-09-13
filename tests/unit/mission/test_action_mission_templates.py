@@ -95,6 +95,7 @@ def test_recon_flow_contains_only_navigation_actions() -> None:
 def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
     names = [step["name"] for step in steps]
+    by_label = {step["label"]: step for step in steps}
     assert "visual_land" not in names
     assert steps[-2]["label"] == "final_land_align"
     assert steps[-1]["name"] == "land"
@@ -110,14 +111,33 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     )
     approaches = [step for step in steps if step.get("label") in {"drop_1_approach", "drop_2_approach"}]
     assert [step["params"]["altitude_m"] for step in approaches] == [2.5, 2.5]
-    captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
-    for capture_index in captures:
-        scan_goto = steps[capture_index - 1]
-        assert scan_goto["name"] == "goto_waypoint"
-        assert scan_goto["params"]["require_velocity_valid"] is True
-        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.25
-        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.15
-        assert scan_goto["params"]["min_hold_updates"] == 4
+    drop_center = by_label["goto_drop_center_4_5m"]
+    assert drop_center["name"] == "goto_waypoint"
+    assert drop_center["params"]["x"] == 0
+    assert drop_center["params"]["y"] == 32.5
+    assert drop_center["params"]["altitude_m"] == 4.5
+    assert drop_center["params"]["require_velocity_valid"] is True
+    assert drop_center["params"]["max_horizontal_speed_mps"] == 0.25
+    assert drop_center["params"]["max_vertical_speed_mps"] == 0.15
+    assert drop_center["params"]["min_hold_updates"] == 4
+    assert [step["label"] for step in steps if step["label"].startswith("drop_scan_goto")] == []
+
+    captures = [step for step in steps if step["name"] == "gps_capture_view"]
+    assert len(captures) == 1
+    assert captures[0]["label"] == "drop_scan_capture"
+    assert captures[0]["save_as"] == "drop_scan_view"
+    assert captures[0]["params"]["source_waypoint"] == "DROP_CENTER"
+
+    fusion = by_label["drop_scan_fuse"]["params"]
+    assert fusion["views"] == ["$drop_scan_view"]
+    assert fusion["fusion"]["min_cluster_size"] == 1
+    assert fusion["fusion"]["min_source_waypoints"] == 1
+
+    selector = by_label["select_gps_drop_targets"]["params"]
+    assert selector["min_seen_count"] == 1
+    assert selector["min_raw_count"] == 1
+    assert selector["deduplicate_radius_m"] == 1.0
+    assert {"recon_speed_1mps", "goto_recon_entry_4m", "restore_return_speed_2mps", "return_home_gps", "land_home"}.issubset(by_label)
 
 
 def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> None:

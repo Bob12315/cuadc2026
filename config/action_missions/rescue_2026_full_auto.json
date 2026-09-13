@@ -29,13 +29,13 @@
     },
     {
       "name": "goto_waypoint",
-      "label": "drop_scan_goto_1",
+      "label": "goto_drop_center_4_5m",
       "on_failed": {
         "action": "continue"
       },
       "params": {
-        "x": -3,
-        "y": 31,
+        "x": 0,
+        "y": 32.5,
         "altitude_m": 4.5,
         "waypoint_mode": "field",
         "target_frame": "global",
@@ -56,159 +56,15 @@
         "control_reject_timeout_s": 1.0,
         "max_duration_s": 180.0,
         "priority": 5,
-        "key": "drop_scan_goto_1"
+        "key": "goto_drop_center_4_5m"
       }
     },
     {
       "name": "gps_capture_view",
-      "label": "drop_scan_capture_1",
-      "save_as": "drop_scan_view_1",
+      "label": "drop_scan_capture",
+      "save_as": "drop_scan_view",
       "params": {
-        "source_waypoint": "DROP_SCAN_1",
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "min_confidence": 0.3,
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        }
-      },
-      "on_failed": {
-        "action": "continue"
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "drop_scan_goto_2",
-      "on_failed": {
-        "action": "continue"
-      },
-      "params": {
-        "x": 3,
-        "y": 31,
-        "altitude_m": 4.5,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "field_heading",
-        "field_yaw_deg": 0,
-        "tolerance_xy_m": 0.30,
-        "tolerance_z_m": 0.30,
-        "min_hold_updates": 4,
-        "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.25,
-        "max_vertical_speed_mps": 0.15,
-        "priority": 5,
-        "key": "drop_scan_goto_2"
-      }
-    },
-    {
-      "name": "gps_capture_view",
-      "label": "drop_scan_capture_2",
-      "save_as": "drop_scan_view_2",
-      "params": {
-        "source_waypoint": "DROP_SCAN_2",
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "min_confidence": 0.3,
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        }
-      },
-      "on_failed": {
-        "action": "continue"
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "drop_scan_goto_3",
-      "on_failed": {
-        "action": "continue"
-      },
-      "params": {
-        "x": 3,
-        "y": 34,
-        "altitude_m": 4.5,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "field_heading",
-        "field_yaw_deg": 0,
-        "tolerance_xy_m": 0.30,
-        "tolerance_z_m": 0.30,
-        "min_hold_updates": 4,
-        "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.25,
-        "max_vertical_speed_mps": 0.15,
-        "priority": 5,
-        "key": "drop_scan_goto_3"
-      }
-    },
-    {
-      "name": "gps_capture_view",
-      "label": "drop_scan_capture_3",
-      "save_as": "drop_scan_view_3",
-      "params": {
-        "source_waypoint": "DROP_SCAN_3",
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "min_confidence": 0.3,
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        }
-      },
-      "on_failed": {
-        "action": "continue"
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "drop_scan_goto_4",
-      "on_failed": {
-        "action": "continue"
-      },
-      "params": {
-        "x": -3,
-        "y": 34,
-        "altitude_m": 4.5,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "field_heading",
-        "field_yaw_deg": 0,
-        "tolerance_xy_m": 0.30,
-        "tolerance_z_m": 0.30,
-        "min_hold_updates": 4,
-        "require_velocity_valid": true,
-        "max_horizontal_speed_mps": 0.25,
-        "max_vertical_speed_mps": 0.15,
-        "priority": 5,
-        "key": "drop_scan_goto_4"
-      }
-    },
-    {
-      "name": "gps_capture_view",
-      "label": "drop_scan_capture_4",
-      "save_as": "drop_scan_view_4",
-      "params": {
-        "source_waypoint": "DROP_SCAN_4",
+        "source_waypoint": "DROP_CENTER",
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -236,10 +92,7 @@
       },
       "params": {
         "views": [
-          "$drop_scan_view_1",
-          "$drop_scan_view_2",
-          "$drop_scan_view_3",
-          "$drop_scan_view_4"
+          "$drop_scan_view"
         ],
         "class_names": [
           "bucket_1",
@@ -250,11 +103,11 @@
         "fusion": {
           "cluster_radius_m": 0.65,
           "outlier_radius_m": 0.65,
-          "min_cluster_size": 3,
-          "min_source_waypoints": 3,
+          "min_cluster_size": 1,
+          "min_source_waypoints": 1,
           "center_weight_power": 1,
-          "max_abs_ex": 0.8,
-          "max_abs_ey": 0.65
+          "max_abs_ex": 0.95,
+          "max_abs_ey": 0.95
         }
       }
     },
@@ -303,10 +156,10 @@
           "bucket_3": 100,
           "bucket": 50
         },
-        "min_seen_count": 3,
-        "min_raw_count": 3,
+        "min_seen_count": 1,
+        "min_raw_count": 1,
         "min_weight": 0,
-        "deduplicate_radius_m": 0.8,
+        "deduplicate_radius_m": 1.0,
         "prefer_class_order": [
           "bucket_1",
           "bucket_2",
