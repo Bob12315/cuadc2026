@@ -16,14 +16,14 @@ model_path: "../data/models/cuadc2026-fp16.rknn"
 inference_workers: 2
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
-class_names: ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji", "bucket", "H"]
+class_names: ["bucket", "H"]
 
 # 检测置信度阈值与 NMS IOU 阈值，范围通常为 0.0 到 1.0。
 conf_thres: 0.30
 iou_thres: 0.45
 
-# 仅保留投放桶和 H 停机坪。类别 ID 必须与 class_names 及 RKNN 模型输出顺序一致。
-classes: [10, 11]
+# 该模型只有 bucket (0) 和 H (1) 两类；保留全部模型输出。
+classes: [0, 1]
 
 # -----------------------------------------------------------------------------
 # 视频输入
