@@ -24,7 +24,7 @@ def test_raw_frame_recorder_writes_mp4_frames(tmp_path) -> None:
     assert (tmp_path / start_status.path.rsplit("/", 1)[-1]).exists()
 
 
-def test_raw_frame_recorder_stops_after_ten_minutes(tmp_path) -> None:
+def test_raw_frame_recorder_stops_after_five_minutes(tmp_path) -> None:
     now = [100.0]
     recorder = RawFrameRecorder(
         str(tmp_path),
@@ -35,7 +35,7 @@ def test_raw_frame_recorder_stops_after_ten_minutes(tmp_path) -> None:
 
     recorder.start(frame.shape)
     recorder.write(frame)
-    now[0] += 599.9
+    now[0] += 299.9
     recorder.write(frame)
     assert recorder.recording is True
     assert recorder.frames == 2
@@ -58,7 +58,7 @@ def test_repeated_start_refreshes_recording_timeout(tmp_path) -> None:
     recorder.start(frame.shape)
     now[0] += 500.0
     recorder.start(frame.shape)
-    now[0] += 599.0
+    now[0] += 299.0
 
     assert recorder.stop_if_expired() is False
     assert recorder.recording is True

@@ -27,7 +27,7 @@ class RawFrameRecorderStatus:
 
 
 class RawFrameRecorder:
-    DEFAULT_MAX_DURATION_S = 10.0 * 60.0
+    DEFAULT_MAX_DURATION_S = 5.0 * 60.0
 
     def __init__(
         self,
