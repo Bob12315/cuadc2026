@@ -246,13 +246,26 @@ def _build_detections(
     xywh = np.column_stack(
         (boxes[:, 0], boxes[:, 1], boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1])
     )
-    indices = cv2.dnn.NMSBoxes(xywh.astype(np.int32).tolist(), confidences.tolist(), conf, iou)
-    if len(indices) == 0:
+    # Suppress duplicate boxes only within their own class.  A single global
+    # NMS pass drops a valid detection whenever two different classes overlap,
+    # which makes multi-class output appear to be limited to a few labels.
+    indices: list[int] = []
+    for class_id in np.unique(class_ids):
+        class_indices = np.flatnonzero(class_ids == class_id)
+        selected = cv2.dnn.NMSBoxes(
+            xywh[class_indices].astype(np.int32).tolist(),
+            confidences[class_indices].tolist(),
+            conf,
+            iou,
+        )
+        if len(selected):
+            indices.extend(class_indices[np.asarray(selected).reshape(-1)].tolist())
+    if not indices:
         return []
 
     height, width = frame_shape[:2]
     detections = []
-    for index in np.asarray(indices).reshape(-1):
+    for index in sorted(indices, key=lambda value: float(confidences[value]), reverse=True):
         x1, y1, x2, y2 = boxes[index]
         class_id = int(class_ids[index])
         class_name = class_names[class_id] if class_id < len(class_names) else str(class_id)

@@ -73,6 +73,20 @@ def test_postprocess_supports_flat_single_class_output() -> None:
     assert (detection.x1, detection.y1, detection.x2, detection.y2) == (100.0, 110.0, 140.0, 170.0)
 
 
+def test_postprocess_keeps_overlapping_detections_from_different_classes() -> None:
+    output = np.zeros((1, 6, 2), dtype=np.float32)
+    output[0, :4] = [[120.0, 120.0], [140.0, 140.0], [80.0, 80.0], [80.0, 80.0]]
+    output[0, 4] = [0.9, 0.1]
+    output[0, 5] = [0.1, 0.8]
+
+    detections = postprocess(
+        [output], 1.0, 0, 0, (640, 640, 3), 0.25, 0.45, class_names=("bucket", "H")
+    )
+
+    assert [item.class_name for item in detections] == ["bucket", "H"]
+    assert [item.confidence for item in detections] == pytest.approx([0.9, 0.8])
+
+
 def test_rknn_iou_tracker_keeps_visible_detection_id() -> None:
     tracker = _IoUTracker(max_lost_frames=5)
     first = Detection(0, "Target", 0.9, 10, 10, 50, 50)
