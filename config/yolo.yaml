@@ -22,8 +22,8 @@ class_names: ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu
 conf_thres: 0.30
 iou_thres: 0.45
 
-# 类别过滤列表。空列表表示保留全部类别，例如 [0] 表示只保留 class_id=0。
-classes: []
+# 仅保留投放桶和 H 停机坪。类别 ID 必须与 class_names 及 RKNN 模型输出顺序一致。
+classes: [10, 11]
 
 # -----------------------------------------------------------------------------
 # 视频输入
