@@ -43,6 +43,11 @@ class AlignDescendAction(ActionModule):
         self.priority = int(data.get("priority", 5))
         self.key = str(data.get("key") or "align_descend").strip() or "align_descend"
         self.started_at = time.monotonic()
+        # Resolve from the field reference at the first Action update, then
+        # keep exactly that absolute heading for this entire Action.  In
+        # particular, target-loss holding must not alter the yaw setpoint.
+        self.fixed_yaw_rad: float | None = None
+        self.yaw_source = "explicit" if self.desired_yaw_deg is not None else "field_centerline"
         self.alignment_window.clear()
         self.last_counted_frame_id = None
         self.started = True
@@ -53,7 +58,7 @@ class AlignDescendAction(ActionModule):
             return ActionResult(failed=True, reason="action_not_started")
 
         data = context or {}
-        yaw = self._desired_yaw_rad(data)
+        yaw = self._fixed_yaw_rad(data)
         if self.stopped:
             return self._terminal(True, "stopped", yaw_rad=yaw)
         if not self.enabled:
@@ -127,6 +132,8 @@ class AlignDescendAction(ActionModule):
         self.priority = 5
         self.key = "align_descend"
         self.started_at = 0.0
+        self.fixed_yaw_rad: float | None = None
+        self.yaw_source = "field_centerline"
         self.alignment_window: deque[bool] = deque(maxlen=self.ALIGNMENT_WINDOW_FRAMES)
         self.last_counted_frame_id: int | None = None
 
@@ -164,7 +171,12 @@ class AlignDescendAction(ActionModule):
             self.last_counted_frame_id = frame_id
         self.alignment_window.append(aligned)
 
-    def _desired_yaw_rad(self, data: dict[str, Any]) -> float:
+    def _fixed_yaw_rad(self, data: dict[str, Any]) -> float:
+        if self.fixed_yaw_rad is None:
+            self.fixed_yaw_rad = self._resolve_yaw_rad(data)
+        return self.fixed_yaw_rad
+
+    def _resolve_yaw_rad(self, data: dict[str, Any]) -> float:
         if self.desired_yaw_deg is not None:
             return self._normalize(math.radians(self.desired_yaw_deg))
         heading = self._optional_finite(data.get("field_heading_yaw_rad")) or 0.0
@@ -183,7 +195,18 @@ class AlignDescendAction(ActionModule):
 
     def _command(self, vx: float, vy: float, vz: float, yaw: float) -> FlightCommand:
         return FlightCommand(
-            params={"valid": True, "active": True, "vx_cmd": vx, "vy_cmd": vy, "vz_cmd": vz, "yaw_hold_rad": yaw},
+            # ActionDispatcher maps yaw_hold_rad to SET_POSITION_TARGET_LOCAL_NED
+            # in MAV_FRAME_BODY_NED, with yaw-rate explicitly ignored.
+            params={
+                "valid": True,
+                "active": True,
+                "vx_cmd": vx,
+                "vy_cmd": vy,
+                "vz_cmd": vz,
+                "yaw_hold_rad": yaw,
+                "control_frame": "MAV_FRAME_BODY_NED",
+                "yaw_mode": "absolute_hold",
+            },
             key=f"{self.key}_body",
             priority=self.priority,
             once=False,
@@ -236,6 +259,10 @@ class AlignDescendAction(ActionModule):
             "target_altitude_m": self.target_altitude_m,
             "yaw_rad": yaw,
             "yaw_deg": math.degrees(yaw) % 360.0,
+            "yaw_source": self.yaw_source,
+            "yaw_latched": self.fixed_yaw_rad is not None,
+            "control_frame": "MAV_FRAME_BODY_NED",
+            "yaw_mode": "absolute_hold",
             "vx_forward_mps": vx,
             "vy_right_mps": vy,
             "vz_down_mps": vz,

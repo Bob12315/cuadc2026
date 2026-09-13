@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from contracts.effects import FlightCommand
 from missions.common.actions.align_descend import AlignDescendAction
 
@@ -126,6 +128,32 @@ def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     assert command.params["vx_cmd"] == 0.0
     assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
+    assert command.params["control_frame"] == "MAV_FRAME_BODY_NED"
+    assert command.params["yaw_mode"] == "absolute_hold"
+    assert "yaw_rate_rad_s" not in command.params
+
+
+def test_yaw_is_latched_for_target_loss_even_if_context_heading_changes() -> None:
+    action = AlignDescendAction()
+    action.start({"field_yaw_deg": 15.0, "target_altitude_m": 1.0})
+
+    first = action.update({
+        "field_heading_yaw_rad": math.radians(70.0),
+        "drone": {"relative_altitude": 2.0},
+        "scene": {"frame_id": 1, "detections": [_detection(0.1, 0.1)]},
+    })
+    lost_target = action.update({
+        "field_heading_yaw_rad": math.radians(160.0),
+        "drone": {"relative_altitude": 2.0},
+        "scene": {"frame_id": 2, "detections": []},
+    })
+
+    assert _command(first).params["yaw_hold_rad"] == pytest.approx(math.radians(85.0))
+    holding = _command(lost_target)
+    assert holding.params["yaw_hold_rad"] == pytest.approx(math.radians(85.0))
+    assert holding.params["vx_cmd"] == holding.params["vy_cmd"] == holding.params["vz_cmd"] == 0.0
+    assert lost_target.detail["yaw_source"] == "field_centerline"
+    assert lost_target.detail["yaw_latched"] is True
 
 
 def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:

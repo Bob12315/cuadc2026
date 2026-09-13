@@ -8,7 +8,12 @@ from execution.policy import action_requires_run_authorization
 from missions.common.actions.result import ActionResult
 from missions.engine import MissionActionStep, MissionOrchestrator
 
-ACTION_MISSION_TICK_INTERVAL_S = 0.5
+# Continuous BODY_NED actions are protected by a 0.5 s deadman.  Refreshing
+# at the same interval makes ordinary scheduler jitter indistinguishable from
+# a stalled Action, so a live align_descend run can be interrupted by its
+# safety STOP.  10 Hz leaves ample margin while retaining the deadman as the
+# failure path for a genuinely stalled action.
+ACTION_MISSION_TICK_INTERVAL_S = 0.1
 
 
 class MissionApplicationService:
