@@ -6,22 +6,18 @@ import time
 from collections import deque
 from typing import Any
 
-from contracts.effects import FlightCommand
+from contracts.effects import ConditionYaw, FlightCommand
 
 from .base import ActionModule
 from .result import ActionResult
-
-
 class AlignDescendAction(ActionModule):
     """Align to the nearest scene target until the low-altitude vote succeeds."""
 
     TIMEOUT_S = 30.0
     ALIGNMENT_WINDOW_FRAMES = 5
     ALIGNMENT_REQUIRED_FRAMES = 3
-
     def __init__(self) -> None:
         self.reset()
-
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
         self.enabled = self._boolean(data.get("enabled", True), "enabled")
@@ -40,6 +36,7 @@ class AlignDescendAction(ActionModule):
         self.vy_sign = self._unit_sign(data.get("vy_sign", 1.0), "vy_sign")
         self.field_yaw_deg = self._finite(data.get("field_yaw_deg", 0.0), "field_yaw_deg")
         self.desired_yaw_deg = self._optional_finite(data.get("desired_yaw_deg"))
+        self.yaw_speed_deg_s = self._positive(data.get("yaw_speed_deg_s", 20.0), "yaw_speed_deg_s")
         self.priority = int(data.get("priority", 5))
         self.key = str(data.get("key") or "align_descend").strip() or "align_descend"
         self.started_at = time.monotonic()
@@ -52,7 +49,6 @@ class AlignDescendAction(ActionModule):
         self.last_counted_frame_id = None
         self.started = True
         self.stopped = False
-
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:
             return ActionResult(failed=True, reason="action_not_started")
@@ -104,11 +100,10 @@ class AlignDescendAction(ActionModule):
             reason = "align_descending"
 
         return ActionResult(
-            effects=(self._command(vx, vy, vz, yaw),),
+            effects=self._effects(vx, vy, vz, yaw),
             reason=reason,
             detail=self._detail(reason, target, altitude, yaw, vx, vy, vz, aligned),
         )
-
     def stop(self) -> None:
         self.stopped = True
 
@@ -129,6 +124,7 @@ class AlignDescendAction(ActionModule):
         self.vy_sign = 1.0
         self.field_yaw_deg = 0.0
         self.desired_yaw_deg = None
+        self.yaw_speed_deg_s = 20.0
         self.priority = 5
         self.key = "align_descend"
         self.started_at = 0.0
@@ -193,19 +189,39 @@ class AlignDescendAction(ActionModule):
         local_z = AlignDescendAction._optional_finite(source.get("local_z"))
         return -local_z if local_z is not None and local_z <= 0.0 else None
 
-    def _command(self, vx: float, vy: float, vz: float, yaw: float) -> FlightCommand:
+    def _effects(self, vx: float, vy: float, vz: float, yaw: float) -> tuple[ConditionYaw | FlightCommand, ...]:
+        # ArduCopter interprets the yaw field of MAV_FRAME_BODY_NED as a
+        # *relative* heading.  Repeating an absolute field yaw in that field
+        # therefore creates a continuously advancing yaw target.  Lock the
+        # absolute heading once with the existing CONDITION_YAW path, then
+        # keep all continuous alignment motion yaw-free in BODY_NED.
+        return (
+            ConditionYaw(
+                params={
+                    "yaw_deg": math.degrees(yaw) % 360.0,
+                    "yaw_speed_deg_s": self.yaw_speed_deg_s,
+                    "direction": 0,
+                    "relative": False,
+                },
+                key=f"{self.key}_yaw_lock",
+                priority=self.priority,
+                once=True,
+            ),
+            self._command(vx, vy, vz),
+        )
+
+    def _command(self, vx: float, vy: float, vz: float) -> FlightCommand:
         return FlightCommand(
-            # ActionDispatcher maps yaw_hold_rad to SET_POSITION_TARGET_LOCAL_NED
-            # in MAV_FRAME_BODY_NED, with yaw-rate explicitly ignored.
+            # Deliberately omit both yaw axes.  The resulting BODY_NED velocity
+            # setpoint has both yaw and yaw-rate ignore bits set (mask 3527).
             params={
                 "valid": True,
                 "active": True,
                 "vx_cmd": vx,
                 "vy_cmd": vy,
                 "vz_cmd": vz,
-                "yaw_hold_rad": yaw,
                 "control_frame": "MAV_FRAME_BODY_NED",
-                "yaw_mode": "absolute_hold",
+                "yaw_mode": "condition_yaw_absolute",
             },
             key=f"{self.key}_body",
             priority=self.priority,
@@ -214,7 +230,7 @@ class AlignDescendAction(ActionModule):
 
     def _holding(self, reason: str, *, yaw_rad: float, altitude_m: float | None) -> ActionResult:
         return ActionResult(
-            effects=(self._command(0.0, 0.0, 0.0, yaw_rad),),
+            effects=self._effects(0.0, 0.0, 0.0, yaw_rad),
             reason=reason,
             detail=self._detail(reason, None, altitude_m, yaw_rad, 0.0, 0.0, 0.0, False),
         )
@@ -230,7 +246,7 @@ class AlignDescendAction(ActionModule):
         aligned: bool = False,
     ) -> ActionResult:
         return ActionResult(
-            effects=(self._command(0.0, 0.0, 0.0, yaw_rad),),
+            effects=self._effects(0.0, 0.0, 0.0, yaw_rad),
             done=done,
             failed=not done,
             reason=reason,
@@ -261,8 +277,11 @@ class AlignDescendAction(ActionModule):
             "yaw_deg": math.degrees(yaw) % 360.0,
             "yaw_source": self.yaw_source,
             "yaw_latched": self.fixed_yaw_rad is not None,
+            "yaw_speed_deg_s": self.yaw_speed_deg_s,
+            "yaw_lock_effect_key": f"{self.key}_yaw_lock",
+            "yaw_lock_relative": False,
             "control_frame": "MAV_FRAME_BODY_NED",
-            "yaw_mode": "absolute_hold",
+            "yaw_mode": "condition_yaw_absolute",
             "vx_forward_mps": vx,
             "vy_right_mps": vy,
             "vz_down_mps": vz,

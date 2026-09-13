@@ -26,7 +26,7 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         "max_vy_mps", "vx_sign", "vy_sign", "field_yaw_deg", "priority", "key",
     }
     assert all(set(item) == allowed for item in generic)
-    assert all(set(item) == allowed | {"enabled", "complete_on_timeout"} for item in rescue)
+    assert all(set(item) == allowed | {"enabled", "complete_on_timeout", "yaw_speed_deg_s"} for item in rescue)
     for item in generic:
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.24
@@ -40,6 +40,7 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)
         assert (item["kp_forward"], item["kp_right"]) == (0.3, 0.3)
         assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.25, 0.25)
+        assert item["yaw_speed_deg_s"] == 20.0
 
 
 def test_capture_camera_and_recon_routes_are_preserved() -> None:

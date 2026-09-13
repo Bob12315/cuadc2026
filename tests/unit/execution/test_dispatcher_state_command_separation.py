@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +29,24 @@ class _CommandPort:
 class _BodyCommandPort:
     def __init__(self) -> None:
         self.commands: list[dict[str, object]] = []
+        self.yaw_locks: list[dict[str, object]] = []
+
+    def condition_yaw(
+        self,
+        yaw_deg: float,
+        yaw_speed_deg_s: float,
+        direction: int,
+        relative: bool,
+        *,
+        priority: int,
+    ) -> None:
+        self.yaw_locks.append({
+            "yaw_deg": yaw_deg,
+            "yaw_speed_deg_s": yaw_speed_deg_s,
+            "direction": direction,
+            "relative": relative,
+            "priority": priority,
+        })
 
     def send_body_velocity(
         self,
@@ -92,31 +109,56 @@ def test_test_source_requires_explicit_fixture_context() -> None:
     assert dispatcher._source_for(None) == "test"
 
 
-def test_align_descend_dispatches_only_body_velocity_with_absolute_yaw_hold() -> None:
+def test_align_descend_locks_absolute_yaw_once_then_dispatches_yaw_free_body_velocity() -> None:
     commands = _BodyCommandPort()
     dispatcher = ActionDispatcher(state_port=_StatePort(), command_port=commands)
     _authorize(dispatcher)
     action = AlignDescendAction()
     action.start({"field_yaw_deg": 90.0})
-    result = action.update({
+    first = action.update({
         "field_heading_yaw_rad": 0.0,
         "drone": {"relative_altitude": 2.0},
         "scene": {"frame_id": 1, "detections": []},
     })
+    second = action.update({
+        "field_heading_yaw_rad": 1.0,
+        "drone": {"relative_altitude": 2.0},
+        "scene": {"frame_id": 2, "detections": []},
+    })
 
-    dispatch = dispatcher.dispatch_result(
-        result,
+    first_dispatch = dispatcher.dispatch_result(
+        first,
         action_name="align_descend",
         send_commands=True,
-        link_manager=None,
+        link_manager=commands,
+    )
+    second_dispatch = dispatcher.dispatch_result(
+        second,
+        action_name="align_descend",
+        send_commands=True,
+        link_manager=commands,
     )
 
-    assert dispatch["accepted"]
+    assert first_dispatch["accepted"]
+    assert second_dispatch["accepted"]
+    assert commands.yaw_locks == [{
+        "yaw_deg": 90.0,
+        "yaw_speed_deg_s": 20.0,
+        "direction": 0,
+        "relative": False,
+        "priority": 5,
+    }]
     assert commands.commands == [{
         "vx_forward_mps": 0.0,
         "vy_right_mps": 0.0,
         "vz_down_mps": 0.0,
-        "yaw_rad": pytest.approx(math.pi / 2),
+        "yaw_rad": None,
+        "yaw_rate_rad_s": None,
+    }, {
+        "vx_forward_mps": 0.0,
+        "vy_right_mps": 0.0,
+        "vz_down_mps": 0.0,
+        "yaw_rad": None,
         "yaw_rate_rad_s": None,
     }]
     dispatcher.safety_pipeline.stop_continuous("test_cleanup", emit=False)

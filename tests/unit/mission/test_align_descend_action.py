@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from contracts.effects import FlightCommand
+from contracts.effects import ConditionYaw, FlightCommand
 from missions.common.actions.align_descend import AlignDescendAction
 
 
@@ -26,10 +26,15 @@ def _detection(ex: float, ey: float, track_id: int = 1) -> dict:
 
 
 def _command(result) -> FlightCommand:
-    assert len(result.effects) == 1
-    command = result.effects[0]
-    assert isinstance(command, FlightCommand)
-    return command
+    commands = [effect for effect in result.effects if isinstance(effect, FlightCommand)]
+    assert len(commands) == 1
+    return commands[0]
+
+
+def _yaw_lock(result) -> ConditionYaw:
+    locks = [effect for effect in result.effects if isinstance(effect, ConditionYaw)]
+    assert len(locks) == 1
+    return locks[0]
 
 
 def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> None:
@@ -55,7 +60,16 @@ def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> No
     assert command.params["vx_cmd"] == 0.2
     assert command.params["vy_cmd"] == 0.1
     assert command.params["vz_cmd"] == 0.2
-    assert math.isclose(command.params["yaw_hold_rad"], math.pi / 2)
+    lock = _yaw_lock(result)
+    assert lock.params == {
+        "yaw_deg": pytest.approx(90.0),
+        "yaw_speed_deg_s": 20.0,
+        "direction": 0,
+        "relative": False,
+    }
+    assert lock.once is True
+    assert "yaw_hold_rad" not in command.params
+    assert "yaw_rate_rad_s" not in command.params
 
 
 def test_descent_does_not_wait_for_alignment() -> None:
@@ -129,7 +143,8 @@ def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
     assert command.params["control_frame"] == "MAV_FRAME_BODY_NED"
-    assert command.params["yaw_mode"] == "absolute_hold"
+    assert command.params["yaw_mode"] == "condition_yaw_absolute"
+    assert "yaw_hold_rad" not in command.params
     assert "yaw_rate_rad_s" not in command.params
 
 
@@ -148,12 +163,16 @@ def test_yaw_is_latched_for_target_loss_even_if_context_heading_changes() -> Non
         "scene": {"frame_id": 2, "detections": []},
     })
 
-    assert _command(first).params["yaw_hold_rad"] == pytest.approx(math.radians(85.0))
+    lock = _yaw_lock(first)
+    assert lock.params["yaw_deg"] == pytest.approx(85.0)
+    assert lock.params["relative"] is False
+    assert lock.params["yaw_speed_deg_s"] == 20.0
     holding = _command(lost_target)
-    assert holding.params["yaw_hold_rad"] == pytest.approx(math.radians(85.0))
+    assert "yaw_hold_rad" not in holding.params
     assert holding.params["vx_cmd"] == holding.params["vy_cmd"] == holding.params["vz_cmd"] == 0.0
     assert lost_target.detail["yaw_source"] == "field_centerline"
     assert lost_target.detail["yaw_latched"] is True
+    assert _yaw_lock(lost_target).params["yaw_deg"] == pytest.approx(85.0)
 
 
 def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:

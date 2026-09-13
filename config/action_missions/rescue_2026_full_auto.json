@@ -372,6 +372,7 @@
         "vx_sign": -1,
         "vy_sign": 1,
         "field_yaw_deg": 0,
+        "yaw_speed_deg_s": 20.0,
         "priority": 5,
         "key": "drop_1_align"
       }
@@ -457,6 +458,7 @@
         "vx_sign": -1,
         "vy_sign": 1,
         "field_yaw_deg": 0,
+        "yaw_speed_deg_s": 20.0,
         "priority": 5,
         "key": "drop_2_align"
       }
@@ -737,6 +739,7 @@
         "vx_sign": -1,
         "vy_sign": 1,
         "field_yaw_deg": 0,
+        "yaw_speed_deg_s": 20.0,
         "priority": 5,
         "key": "final_land_align"
       }
