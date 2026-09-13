@@ -69,7 +69,7 @@ def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> No
     }
     assert lock.once is True
     assert "yaw_hold_rad" not in command.params
-    assert "yaw_rate_rad_s" not in command.params
+    assert command.params["yaw_rate_rad_s"] == 0.0
 
 
 def test_descent_does_not_wait_for_alignment() -> None:
@@ -145,7 +145,7 @@ def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     assert command.params["control_frame"] == "MAV_FRAME_BODY_NED"
     assert command.params["yaw_mode"] == "condition_yaw_absolute"
     assert "yaw_hold_rad" not in command.params
-    assert "yaw_rate_rad_s" not in command.params
+    assert command.params["yaw_rate_rad_s"] == 0.0
 
 
 def test_yaw_is_latched_for_target_loss_even_if_context_heading_changes() -> None:

@@ -212,13 +212,15 @@ class AlignDescendAction(ActionModule):
 
     def _command(self, vx: float, vy: float, vz: float) -> FlightCommand:
         return FlightCommand(
-            # Deliberately omit both yaw axes.  The resulting BODY_NED velocity
-            # setpoint has both yaw and yaw-rate ignore bits set (mask 3527).
+            # BODY_NED yaw is relative, so the absolute heading stays on the one-shot
+            # CONDITION_YAW command.  Keep yaw ignored but make yaw_rate=0 valid (mask 1479).
+            # This prevents the velocity controller from selecting a movement-facing yaw.
             params={
                 "valid": True,
                 "active": True,
                 "vx_cmd": vx,
                 "vy_cmd": vy,
+                "yaw_rate_rad_s": 0.0,
                 "vz_cmd": vz,
                 "control_frame": "MAV_FRAME_BODY_NED",
                 "yaw_mode": "condition_yaw_absolute",

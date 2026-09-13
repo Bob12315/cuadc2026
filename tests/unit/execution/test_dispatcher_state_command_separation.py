@@ -109,7 +109,7 @@ def test_test_source_requires_explicit_fixture_context() -> None:
     assert dispatcher._source_for(None) == "test"
 
 
-def test_align_descend_locks_absolute_yaw_once_then_dispatches_yaw_free_body_velocity() -> None:
+def test_align_descend_locks_absolute_yaw_once_then_dispatches_zero_yaw_rate_body_velocity() -> None:
     commands = _BodyCommandPort()
     dispatcher = ActionDispatcher(state_port=_StatePort(), command_port=commands)
     _authorize(dispatcher)
@@ -153,13 +153,13 @@ def test_align_descend_locks_absolute_yaw_once_then_dispatches_yaw_free_body_vel
         "vy_right_mps": 0.0,
         "vz_down_mps": 0.0,
         "yaw_rad": None,
-        "yaw_rate_rad_s": None,
+        "yaw_rate_rad_s": 0.0,
     }, {
         "vx_forward_mps": 0.0,
         "vy_right_mps": 0.0,
         "vz_down_mps": 0.0,
         "yaw_rad": None,
-        "yaw_rate_rad_s": None,
+        "yaw_rate_rad_s": 0.0,
     }]
     dispatcher.safety_pipeline.stop_continuous("test_cleanup", emit=False)
     dispatcher.safety_pipeline.continuous_guard.close()
