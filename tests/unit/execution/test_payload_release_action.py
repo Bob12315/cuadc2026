@@ -256,7 +256,10 @@ def test_release_and_wait_continuously_publish_zero_velocity_command() -> None:
         assert command["vz_cmd"] == 0.0
         assert command["valid"] is True
         assert command["enable_body"] is True
-        assert command["yaw_hold_rad"] == pytest.approx(1.2)
+        assert command["yaw_rate_rad_s"] == 0.0
+        assert command["control_frame"] == "MAV_FRAME_BODY_NED"
+        assert "yaw_hold_rad" not in command
+        assert "velocity_yaw_rad" not in command
 
 
 def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
@@ -266,8 +269,13 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
         def set_servo_output_pwm(self, *, servo_output, pwm, priority):
             calls.append(("servo", servo_output, pwm, priority))
 
-        def send_velocity_command(self, vx, vy, vz, *, frame, yaw_rad=None):
-            calls.append(("velocity", vx, vy, vz, frame, yaw_rad))
+        def send_body_velocity(
+            self, *, vx_forward_mps, vy_right_mps, vz_down_mps, yaw_rate_rad_s,
+        ):
+            calls.append((
+                "body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps,
+                yaw_rate_rad_s,
+            ))
 
     action = PayloadReleaseAction()
     action.start(_params(servo_outputs=[
@@ -290,7 +298,7 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
 
     assert [item["action_type"] for item in dispatch["accepted"]] == ["set_servo", "flight_command"]
     assert calls[0][:3] == ("servo", 9, 1745)
-    assert calls[1][0:4] == ("velocity", 0.0, 0.0, 0.0)
+    assert calls[1] == ("body_velocity", 0.0, 0.0, 0.0, 0.0)
 
 
 def test_wait_completion_sends_hold_pwm_once_and_finishes() -> None:

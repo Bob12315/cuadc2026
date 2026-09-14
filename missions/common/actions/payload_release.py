@@ -175,15 +175,20 @@ class PayloadReleaseAction(ActionModule):
         }
 
     def _zero_velocity_command(self, context: dict[str, Any]) -> dict[str, Any]:
-        yaw_hold = self._context_float(context, "field_heading_yaw_rad")
-        if yaw_hold is None:
-            yaw_hold = self._context_float(context, "arm_heading_yaw_rad")
+        # ArduCopter treats the yaw field of BODY_NED velocity setpoints as
+        # relative.  Do not put the absolute FIELD heading here: this command
+        # is refreshed throughout the servo dwell and would continuously
+        # advance the vehicle's yaw target.  The preceding align_descend has
+        # already set its absolute heading through CONDITION_YAW.
         command: dict[str, Any] = {
             "type": "flight_command",
             "vx_cmd": 0.0,
             "vy_cmd": 0.0,
             "vz_cmd": 0.0,
             "yaw_rate_cmd": 0.0,
+            "yaw_rate_rad_s": 0.0,
+            "control_frame": "MAV_FRAME_BODY_NED",
+            "yaw_mode": "ignore_absolute_yaw",
             "enable_body": True,
             "enable_gimbal": False,
             "enable_gimbal_angle": False,
@@ -192,20 +197,7 @@ class PayloadReleaseAction(ActionModule):
             "valid": True,
             "priority": self.priority,
         }
-        if yaw_hold is not None:
-            command["yaw_hold_rad"] = yaw_hold
-            command["velocity_yaw_rad"] = yaw_hold
         return command
-
-    @staticmethod
-    def _context_float(context: dict[str, Any], name: str) -> float | None:
-        value = context.get(name)
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def _boolean(value: Any, name: str) -> bool:
