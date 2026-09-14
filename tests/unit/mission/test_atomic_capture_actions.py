@@ -41,6 +41,24 @@ def test_gps_projection_uses_pinhole_image_coordinates() -> None:
     assert estimate.north_offset_m == pytest.approx(0.0)
 
 
+def test_gps_projection_scales_ground_distance_from_capture_point() -> None:
+    projector = GpsTargetProjector(GpsProjectionCamera(
+        fov_x_deg=90, fov_y_deg=90, ground_distance_scale=1 / 3,
+    ))
+
+    estimate = projector.project(
+        drone_lat=0.0,
+        drone_lon=0.0,
+        drone_yaw_rad=0.0,
+        relative_altitude_m=10.0,
+        ex=0.5,
+        ey=0.0,
+    )
+
+    assert estimate.east_offset_m == pytest.approx(5 / 3)
+    assert estimate.north_offset_m == pytest.approx(0.0)
+
+
 def test_gps_fuse_output_uses_json_arrays_for_source_metadata() -> None:
     output = _output_item(GpsLocalizedObject(
         id=1, lat=34.0, lon=108.0, east_m=1.0, north_m=2.0,

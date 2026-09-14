@@ -28,6 +28,7 @@ class GpsProjectionCamera:
     image_x_sign: float = 1.0
     image_y_sign: float = -1.0
     min_altitude_m: float = 0.1
+    ground_distance_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if not 0.0 < self.fov_x_deg < 180.0:
@@ -40,6 +41,8 @@ class GpsProjectionCamera:
             raise ValueError("image_y_sign must be ±1")
         if self.min_altitude_m <= 0.0:
             raise ValueError("min_altitude_m must be > 0")
+        if not 0.0 < self.ground_distance_scale <= 1.0:
+            raise ValueError("ground_distance_scale must be in (0, 1]")
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +145,14 @@ class GpsTargetProjector:
         angle_y = math.atan(ey * math.tan(half_fov_y))
 
         # body-frame offsets (forward/right, metres on ground plane)
-        body_right_m = self.camera.image_x_sign * relative_altitude_m * math.tan(angle_x)
-        body_forward_m = self.camera.image_y_sign * relative_altitude_m * math.tan(angle_y)
+        body_right_m = (
+            self.camera.ground_distance_scale
+            * self.camera.image_x_sign * relative_altitude_m * math.tan(angle_x)
+        )
+        body_forward_m = (
+            self.camera.ground_distance_scale
+            * self.camera.image_y_sign * relative_altitude_m * math.tan(angle_y)
+        )
 
         # ── rotate body → ENU east/north ──────────────────────────────
         cos_yaw = math.cos(drone_yaw_rad)

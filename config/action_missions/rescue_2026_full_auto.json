@@ -76,7 +76,8 @@
           "fov_x_deg": 142.964844,
           "fov_y_deg": 131.870643,
           "image_x_sign": 1,
-          "image_y_sign": -1
+          "image_y_sign": -1,
+          "ground_distance_scale": 0.3333333333333333
         }
       },
       "on_failed": {

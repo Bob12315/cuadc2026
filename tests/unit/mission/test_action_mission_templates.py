@@ -147,6 +147,7 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
         "fov_y_deg": 131.870643,
         "image_x_sign": 1,
         "image_y_sign": -1,
+        "ground_distance_scale": 1 / 3,
     }
 
     for step in steps:
