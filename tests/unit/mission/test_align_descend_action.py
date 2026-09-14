@@ -86,7 +86,36 @@ def test_descent_does_not_wait_for_alignment() -> None:
     assert _command(result).params["vz_cmd"] == 0.2
 
 
-def test_low_altitude_succeeds_when_three_of_five_frames_are_aligned() -> None:
+
+def test_release_offset_applies_only_after_reaching_release_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.2,
+        "release_target_ex": 0.0,
+        "release_target_ey": 0.2,
+        "kp_forward": 1.0,
+        "kp_right": 1.0,
+        "max_vx_mps": 1.0,
+        "max_vy_mps": 1.0,
+    })
+
+    descending = action.update(_context(
+        frame_id=1, detections=[_detection(0.0, 0.1)], altitude_m=1.3,
+    ))
+    final_height = action.update(_context(
+        frame_id=2, detections=[_detection(0.0, 0.1)], altitude_m=1.2,
+    ))
+
+    assert descending.detail["release_offset_active"] is False
+    assert descending.detail["alignment_error_ey"] == pytest.approx(0.1)
+    assert _command(descending).params["vx_cmd"] == pytest.approx(-0.1)
+    assert final_height.detail["release_offset_active"] is True
+    assert final_height.detail["release_target_ey"] == pytest.approx(0.2)
+    assert final_height.detail["alignment_error_ey"] == pytest.approx(-0.1)
+    assert _command(final_height).params["vx_cmd"] == pytest.approx(0.1)
+    assert _command(final_height).params["vz_cmd"] == 0.0
+
+def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.0,
@@ -94,7 +123,7 @@ def test_low_altitude_succeeds_when_three_of_five_frames_are_aligned() -> None:
         "release_deadband_ey": 0.1,
     })
 
-    samples = [(0.0, 0.0), (0.2, 0.0), (0.05, -0.05), (0.0, 0.2), (0.1, 0.1)]
+    samples = [(0.0, 0.0), (0.2, 0.0), (0.05, -0.05), (0.0, 0.2), (0.2, 0.2)]
     results = [
         action.update(_context(
             frame_id=index,
@@ -107,7 +136,7 @@ def test_low_altitude_succeeds_when_three_of_five_frames_are_aligned() -> None:
     assert all(not result.done for result in results[:4])
     assert results[-1].done and not results[-1].failed
     assert results[-1].reason == "alignment_confirmed"
-    assert results[-1].detail["alignment_hits"] == 3
+    assert results[-1].detail["alignment_hits"] == 2
     command = _command(results[-1])
     assert command.params["vx_cmd"] == 0.0
     assert command.params["vy_cmd"] == 0.0

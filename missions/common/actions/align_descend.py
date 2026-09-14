@@ -15,7 +15,7 @@ class AlignDescendAction(ActionModule):
 
     TIMEOUT_S = 30.0
     ALIGNMENT_WINDOW_FRAMES = 5
-    ALIGNMENT_REQUIRED_FRAMES = 3
+    ALIGNMENT_REQUIRED_FRAMES = 2
     def __init__(self) -> None:
         self.reset()
     def start(self, params: dict[str, Any] | None = None) -> None:
@@ -28,6 +28,8 @@ class AlignDescendAction(ActionModule):
         self.descend_speed_mps = self._non_negative(data.get("descend_speed_mps", 0.2), "descend_speed_mps")
         self.release_deadband_ex = self._positive(data.get("release_deadband_ex", 0.1), "release_deadband_ex")
         self.release_deadband_ey = self._positive(data.get("release_deadband_ey", 0.1), "release_deadband_ey")
+        self.release_target_ex = self._finite(data.get("release_target_ex", 0.0), "release_target_ex")
+        self.release_target_ey = self._finite(data.get("release_target_ey", 0.0), "release_target_ey")
         self.kp_forward = self._non_negative(data.get("kp_forward", 0.3), "kp_forward")
         self.kp_right = self._non_negative(data.get("kp_right", 0.3), "kp_right")
         self.max_vx_mps = self._positive(data.get("max_vx_mps", 0.25), "max_vx_mps")
@@ -76,9 +78,14 @@ class AlignDescendAction(ActionModule):
             return self._holding(reason, yaw_rad=yaw, altitude_m=altitude)
 
         ex, ey = target["ex"], target["ey"]
-        vx = self._clamp(self.vx_sign * self.kp_forward * ey, self.max_vx_mps)
-        vy = self._clamp(self.vy_sign * self.kp_right * ex, self.max_vy_mps)
-        aligned = abs(ex) <= self.release_deadband_ex and abs(ey) <= self.release_deadband_ey
+        release_offset_active = altitude <= self.target_altitude_m
+        release_target_ex = self.release_target_ex if release_offset_active else 0.0
+        release_target_ey = self.release_target_ey if release_offset_active else 0.0
+        alignment_ex = ex - release_target_ex
+        alignment_ey = ey - release_target_ey
+        vx = self._clamp(self.vx_sign * self.kp_forward * alignment_ey, self.max_vx_mps)
+        vy = self._clamp(self.vy_sign * self.kp_right * alignment_ex, self.max_vy_mps)
+        aligned = abs(alignment_ex) <= self.release_deadband_ex and abs(alignment_ey) <= self.release_deadband_ey
 
         if altitude <= self.target_altitude_m:
             vz = 0.0
@@ -115,6 +122,8 @@ class AlignDescendAction(ActionModule):
         self.target_altitude_m = 1.2
         self.descend_speed_mps = 0.2
         self.release_deadband_ex = 0.1
+        self.release_target_ex = 0.0
+        self.release_target_ey = 0.0
         self.release_deadband_ey = 0.1
         self.kp_forward = 0.3
         self.kp_right = 0.3
@@ -266,8 +275,18 @@ class AlignDescendAction(ActionModule):
         vz: float,
         aligned: bool,
     ) -> dict[str, Any]:
+        release_offset_active = altitude is not None and 0.0 < altitude <= self.target_altitude_m
+        release_target_ex = self.release_target_ex if release_offset_active else 0.0
+        release_target_ey = self.release_target_ey if release_offset_active else 0.0
+        alignment_error_ex = None if target is None else target["ex"] - release_target_ex
+        alignment_error_ey = None if target is None else target["ey"] - release_target_ey
         return {
             "state": reason,
+            "release_offset_active": release_offset_active,
+            "release_target_ex": release_target_ex,
+            "release_target_ey": release_target_ey,
+            "alignment_error_ex": alignment_error_ex,
+            "alignment_error_ey": alignment_error_ey,
             "enabled": self.enabled,
             "complete_on_timeout": self.complete_on_timeout,
             "target_track_id": None if target is None else target.get("track_id"),

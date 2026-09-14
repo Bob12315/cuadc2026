@@ -33,7 +33,7 @@ classes: [0, 1]
 # - UDP H264/RTP：端口号字符串，例如 "5600"
 # - RTSP、本地视频文件或完整 GStreamer pipeline
 # 已通过 uvcvideo/V4L2 确认的视频采集节点；避免 /dev/video41 编号变化。
-source: "/dev/v4l/by-id/usb-HD_720P_Webcam_HD_720P_Webcam_20130901-video-index0"
+source: "/dev/video41"
 
 # 本地摄像头采集参数。
 camera_width: 640
