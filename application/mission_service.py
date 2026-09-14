@@ -152,6 +152,28 @@ class MissionApplicationService:
                 steps=steps,
             )
 
+    def configure_and_start_action_mission(
+        self,
+        steps: list[MissionActionStep],
+        *,
+        authorize: bool = False,
+        operator: str = "system",
+        target_source: str | None = None,
+    ) -> dict[str, object]:
+        """Start exactly the Mission revision supplied by the Web UI.
+
+        Keeping configuration and start under the same runtime lock prevents a
+        stale, previously configured Mission from running when an operator
+        presses Start immediately after selecting a template.
+        """
+        with self.action_runtime_lock:
+            self.configure_action_mission(steps)
+            return self.action_mission_start(
+                authorize=authorize,
+                operator=operator,
+                target_source=target_source,
+            )
+
     def action_mission_status_payload(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return {

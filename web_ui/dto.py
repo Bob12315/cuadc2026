@@ -47,6 +47,13 @@ class ActionMissionConfigureRequest(BaseModel):
     steps: list[ActionMissionStepRequest]
 
 
+class ActionMissionConfigureAndStartRequest(ActionMissionConfigureRequest):
+    """Configure the editor's Mission and start that exact revision atomically."""
+
+    authorize: bool = False
+    target_source: str | None = None
+
+
 class RuntimeSamplingStartRequest(BaseModel):
     forward_marker_lat: StrictFloat
     forward_marker_lon: StrictFloat

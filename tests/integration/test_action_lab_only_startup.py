@@ -176,6 +176,7 @@ def test_action_mission_start_stop_reset_lifecycle() -> None:
 def test_action_mission_web_api_lifecycle() -> None:
     from types import SimpleNamespace
     from web_ui.dto import (
+        ActionMissionConfigureAndStartRequest,
         ActionMissionConfigureRequest,
         ActionMissionStepRequest,
         RunStartRequest,
@@ -202,6 +203,20 @@ def test_action_mission_web_api_lifecycle() -> None:
     )
     assert configured["ok"] is True
     assert configured["action_mission"]["enabled"] is True
+
+    configured_and_started = endpoint("/api/action-mission/configure-and-start")(
+        ActionMissionConfigureAndStartRequest(
+            steps=[
+                ActionMissionStepRequest(name="change_speed", params={"speed_mps": 1.0}),
+            ],
+            authorize=True,
+            target_source="real",
+        ),
+        SimpleNamespace(state=SimpleNamespace(identity=SimpleNamespace(operator="test"))),
+    )
+    assert configured_and_started["ok"] is True
+    assert configured_and_started["action_mission"]["running"] is True
+    assert configured_and_started["action_mission"]["current_action"] == "change_speed"
 
     started = endpoint("/api/action-mission/start")(
         RunStartRequest(authorize=True, target_source="real"),

@@ -582,6 +582,8 @@ async function configureActionMission() {
   renderActionMissionStatus(result.action_mission || null);
 }
 async function startActionMission() {
+  const steps = parseActionMissionSteps();
+  if (steps === null) return;
   const source = String(state.active_source || state.link?.active_source || "real").toLowerCase();
   const sourceLabel = source === "sitl" ? "SITL" : "REAL";
   const confirmed = window.confirm(
@@ -589,12 +591,14 @@ async function startActionMission() {
     + "授权绑定本次 run；系统 SEND=OFF 时仍不会实发。"
   );
   if (!confirmed) return;
-  const result = await json("/api/action-mission/start", {
+  currentActionMission = parseActionMissionInput($("actionMissionSteps").value);
+  currentActionMissionSteps = steps;
+  const result = await json("/api/action-mission/configure-and-start", {
     method: "POST",
-    body: JSON.stringify({authorize: true, target_source: source}),
+    body: JSON.stringify({steps, authorize: true, target_source: source}),
   });
   if (!result.ok) throw new Error(result.error || "Action Mission 启动失败");
-  $("completionHint").textContent = "Action Mission 已启动";
+  $("completionHint").textContent = "Action Mission 已按当前配置启动";
   lastActionMissionSummaryHtml = "";
   renderActionMissionStatus(result.action_mission || null);
 }

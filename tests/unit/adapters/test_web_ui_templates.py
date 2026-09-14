@@ -47,6 +47,13 @@ def test_api_client_is_only_fetch_owner() -> None:
     assert [path.name for path in owners] == ["api_client.js"]
 
 
+def test_start_uses_the_editor_mission_revision() -> None:
+    source = (STATIC / "js/control.js").read_text()
+    start = source[source.index("async function startActionMission()"):source.index("async function stopActionMission()")]
+    assert 'json("/api/action-mission/configure-and-start"' in start
+    assert "JSON.stringify({steps, authorize: true, target_source: source})" in start
+
+
 def test_web_template_catalog_is_not_in_server_lifecycle() -> None:
     server = (ROOT / "web_ui/server.py").read_text()
     templates = (ROOT / "web_ui/templates.py").read_text()

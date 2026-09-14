@@ -4,7 +4,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from missions.engine import MissionActionStep
 from web_ui.context import WebContext
-from web_ui.dto import ActionMissionConfigureRequest, RunStartRequest
+from web_ui.dto import (
+    ActionMissionConfigureAndStartRequest,
+    ActionMissionConfigureRequest,
+    RunStartRequest,
+)
 from web_ui.templates import ACTION_MISSION_TEMPLATE_NAMES, load_action_mission_template
 
 
@@ -56,6 +60,33 @@ def build_router(ctx: WebContext) -> APIRouter:
         try:
             result = mission.action_mission_start(
                 authorize=payload.authorize, operator=request.state.identity.operator,
+                target_source=source,
+            )
+            return {"ok": not result.get("failed", False), "action_mission": result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @router.post("/configure-and-start")
+    def configure_and_start(payload: ActionMissionConfigureAndStartRequest, request: Request):
+        source = payload.target_source or mission.active_telemetry_source()
+        if source not in {"sitl", "real"}:
+            raise HTTPException(status_code=400, detail="target_source must be sitl or real")
+        if payload.target_source is not None and source != mission.active_telemetry_source():
+            raise HTTPException(status_code=409, detail="target_source is not the active telemetry source")
+        try:
+            result = mission.configure_and_start_action_mission(
+                [
+                    MissionActionStep(
+                        step.name,
+                        dict(step.params or {}),
+                        save_as=step.save_as,
+                        label=step.label,
+                        on_failed=step.on_failed,
+                    )
+                    for step in payload.steps
+                ],
+                authorize=payload.authorize,
+                operator=request.state.identity.operator,
                 target_source=source,
             )
             return {"ok": not result.get("failed", False), "action_mission": result}
