@@ -39,10 +39,10 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.30
         assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.05, 0.05)
-        assert (item["kp_forward"], item["kp_right"]) == (0.6, 0.6)
-        assert (item["ki_forward"], item["ki_right"]) == (0.25, 0.25)
-        assert item["integral_limit"] == 0.2
-        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.35, 0.35)
+        assert (item["kp_forward"], item["kp_right"]) == (0.5, 0.5)
+        assert (item["ki_forward"], item["ki_right"]) == (0.05, 0.05)
+        assert item["integral_limit"] == 0.08
+        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.25, 0.25)
         assert item["yaw_speed_deg_s"] == 20.0
 
 
