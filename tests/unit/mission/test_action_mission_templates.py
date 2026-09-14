@@ -188,6 +188,10 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_2_approach"]["params"]["target"] == "$drop_targets.target_slots.1"
     assert by_label["drop_1_align"]["params"]["enabled"] == "$drop_targets.first_alignment_enabled"
     assert by_label["drop_2_align"]["params"]["enabled"] == "$drop_targets.second_alignment_enabled"
+    assert by_label["drop_1_align"]["params"]["release_deadband_ex"] == 0.05
+    assert by_label["drop_1_align"]["params"]["release_deadband_ey"] == 0.05
+    assert by_label["drop_2_align"]["params"]["release_deadband_ex"] == 0.05
+    assert by_label["drop_2_align"]["params"]["release_deadband_ey"] == 0.05
     assert by_label["drop_1_align"]["params"]["release_target_ey"] == -0.15
     assert by_label["drop_2_align"]["params"]["release_target_ey"] == 0.15
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"
