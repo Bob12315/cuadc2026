@@ -59,6 +59,17 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
     expected_goto = dict(first_step["goto_waypoint"])
     expected_goto["field_x_m"] = expected_goto.pop("x")
     expected_goto["field_y_m"] = expected_goto.pop("y")
+    expected_goto.update({
+        "tolerance_xy_m": 0.30,
+        "tolerance_z_m": 0.30,
+        "min_hold_updates": 4,
+        "max_horizontal_speed_mps": 0.25,
+        "max_vertical_speed_mps": 0.15,
+        "position_hysteresis_xy_m": 0.20,
+        "position_hysteresis_z_m": 0.10,
+        "horizontal_speed_hysteresis_mps": 0.10,
+        "vertical_speed_hysteresis_mps": 0.05,
+    })
     assert goto == expected_goto
 
     capture = definitions["gps_capture_view"].default_params

@@ -117,9 +117,15 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     assert drop_center["params"]["y"] == 32.5
     assert drop_center["params"]["altitude_m"] == 4.5
     assert drop_center["params"]["require_velocity_valid"] is True
-    assert drop_center["params"]["max_horizontal_speed_mps"] == 0.25
-    assert drop_center["params"]["max_vertical_speed_mps"] == 0.15
-    assert drop_center["params"]["min_hold_updates"] == 4
+    assert drop_center["params"]["tolerance_xy_m"] == 0.15
+    assert drop_center["params"]["tolerance_z_m"] == 0.15
+    assert drop_center["params"]["max_horizontal_speed_mps"] == 0.10
+    assert drop_center["params"]["max_vertical_speed_mps"] == 0.05
+    assert drop_center["params"]["min_hold_updates"] == 10
+    assert drop_center["params"]["position_hysteresis_xy_m"] == 0.05
+    assert drop_center["params"]["position_hysteresis_z_m"] == 0.05
+    assert drop_center["params"]["horizontal_speed_hysteresis_mps"] == 0.05
+    assert drop_center["params"]["vertical_speed_hysteresis_mps"] == 0.03
     assert [step["label"] for step in steps if step["label"].startswith("drop_scan_goto")] == []
 
     captures = [step for step in steps if step["name"] == "gps_capture_view"]
@@ -206,8 +212,8 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_2_align"]["params"]["integral_limit"] == 0.08
     assert by_label["drop_2_align"]["params"]["max_vx_mps"] == 0.25
     assert by_label["drop_2_align"]["params"]["max_vy_mps"] == 0.25
-    assert by_label["drop_1_align"]["params"]["release_target_ey"] == -0.15
-    assert by_label["drop_2_align"]["params"]["release_target_ey"] == 0.15
+    assert by_label["drop_1_align"]["params"]["release_target_ey"] == 0.0
+    assert by_label["drop_2_align"]["params"]["release_target_ey"] == 0.0
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"
     assert by_label["drop_1_align"]["params"]["complete_on_timeout"] is True
     assert by_label["drop_2_align"]["params"]["complete_on_timeout"] is True
