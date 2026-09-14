@@ -192,6 +192,20 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_1_align"]["params"]["release_deadband_ey"] == 0.05
     assert by_label["drop_2_align"]["params"]["release_deadband_ex"] == 0.05
     assert by_label["drop_2_align"]["params"]["release_deadband_ey"] == 0.05
+    assert by_label["drop_1_align"]["params"]["kp_forward"] == 0.6
+    assert by_label["drop_1_align"]["params"]["kp_right"] == 0.6
+    assert by_label["drop_1_align"]["params"]["ki_forward"] == 0.25
+    assert by_label["drop_1_align"]["params"]["ki_right"] == 0.25
+    assert by_label["drop_1_align"]["params"]["integral_limit"] == 0.2
+    assert by_label["drop_1_align"]["params"]["max_vx_mps"] == 0.35
+    assert by_label["drop_1_align"]["params"]["max_vy_mps"] == 0.35
+    assert by_label["drop_2_align"]["params"]["kp_forward"] == 0.6
+    assert by_label["drop_2_align"]["params"]["kp_right"] == 0.6
+    assert by_label["drop_2_align"]["params"]["ki_forward"] == 0.25
+    assert by_label["drop_2_align"]["params"]["ki_right"] == 0.25
+    assert by_label["drop_2_align"]["params"]["integral_limit"] == 0.2
+    assert by_label["drop_2_align"]["params"]["max_vx_mps"] == 0.35
+    assert by_label["drop_2_align"]["params"]["max_vy_mps"] == 0.35
     assert by_label["drop_1_align"]["params"]["release_target_ey"] == -0.15
     assert by_label["drop_2_align"]["params"]["release_target_ey"] == 0.15
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"

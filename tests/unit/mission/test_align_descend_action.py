@@ -115,6 +115,31 @@ def test_release_offset_applies_only_after_reaching_release_altitude() -> None:
     assert _command(final_height).params["vx_cmd"] == pytest.approx(0.1)
     assert _command(final_height).params["vz_cmd"] == 0.0
 
+
+def test_bounded_integral_increases_persistent_close_range_correction(monkeypatch) -> None:
+    action = AlignDescendAction()
+    clock = iter((100.0, 100.0, 100.2, 100.2, 100.4, 100.4))
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: next(clock))
+    action.start({
+        "target_altitude_m": 1.2,
+        "kp_forward": 0.6,
+        "kp_right": 0.6,
+        "ki_forward": 0.25,
+        "ki_right": 0.25,
+        "integral_limit": 0.2,
+        "max_vx_mps": 1.0,
+        "max_vy_mps": 1.0,
+    })
+
+    first = action.update(_context(frame_id=1, detections=[_detection(0.1, -0.1)], altitude_m=1.2))
+    second = action.update(_context(frame_id=2, detections=[_detection(0.1, -0.1)], altitude_m=1.2))
+
+    assert _command(first).params["vx_cmd"] == pytest.approx(0.065)
+    assert _command(second).params["vx_cmd"] == pytest.approx(0.07)
+    assert _command(second).params["vy_cmd"] == pytest.approx(0.07)
+    assert second.detail["integral_forward"] == pytest.approx(-0.04)
+    assert second.detail["integral_right"] == pytest.approx(0.04)
+
 def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
     action = AlignDescendAction()
     action.start({

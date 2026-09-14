@@ -32,6 +32,9 @@ class AlignDescendAction(ActionModule):
         self.release_target_ey = self._finite(data.get("release_target_ey", 0.0), "release_target_ey")
         self.kp_forward = self._non_negative(data.get("kp_forward", 0.3), "kp_forward")
         self.kp_right = self._non_negative(data.get("kp_right", 0.3), "kp_right")
+        self.ki_forward = self._non_negative(data.get("ki_forward", 0.0), "ki_forward")
+        self.ki_right = self._non_negative(data.get("ki_right", 0.0), "ki_right")
+        self.integral_limit = self._non_negative(data.get("integral_limit", 0.25), "integral_limit")
         self.max_vx_mps = self._positive(data.get("max_vx_mps", 0.25), "max_vx_mps")
         self.max_vy_mps = self._positive(data.get("max_vy_mps", 0.25), "max_vy_mps")
         self.vx_sign = self._unit_sign(data.get("vx_sign", -1.0), "vx_sign")
@@ -49,6 +52,7 @@ class AlignDescendAction(ActionModule):
         self.yaw_source = "explicit" if self.desired_yaw_deg is not None else "field_centerline"
         self.alignment_window.clear()
         self.last_counted_frame_id = None
+        self._reset_integral()
         self.started = True
         self.stopped = False
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
@@ -72,6 +76,7 @@ class AlignDescendAction(ActionModule):
         target = self._nearest_scene_target(scene)
         altitude = self._altitude(data)
         if target is None or altitude is None or altitude <= 0.0:
+            self._reset_integral()
             if altitude is not None and altitude <= self.target_altitude_m:
                 self._record_alignment_frame(scene, False)
             reason = "target_not_found" if target is None else "altitude_unavailable"
@@ -83,8 +88,15 @@ class AlignDescendAction(ActionModule):
         release_target_ey = self.release_target_ey if release_offset_active else 0.0
         alignment_ex = ex - release_target_ex
         alignment_ey = ey - release_target_ey
-        vx = self._clamp(self.vx_sign * self.kp_forward * alignment_ey, self.max_vx_mps)
-        vy = self._clamp(self.vy_sign * self.kp_right * alignment_ex, self.max_vy_mps)
+        self._update_integral(scene, alignment_ex, alignment_ey)
+        vx = self._clamp(
+            self.vx_sign * (self.kp_forward * alignment_ey + self.ki_forward * self.integral_forward),
+            self.max_vx_mps,
+        )
+        vy = self._clamp(
+            self.vy_sign * (self.kp_right * alignment_ex + self.ki_right * self.integral_right),
+            self.max_vy_mps,
+        )
         aligned = abs(alignment_ex) <= self.release_deadband_ex and abs(alignment_ey) <= self.release_deadband_ey
 
         if altitude <= self.target_altitude_m:
@@ -127,6 +139,9 @@ class AlignDescendAction(ActionModule):
         self.release_deadband_ey = 0.1
         self.kp_forward = 0.3
         self.kp_right = 0.3
+        self.ki_forward = 0.0
+        self.ki_right = 0.0
+        self.integral_limit = 0.25
         self.max_vx_mps = 0.25
         self.max_vy_mps = 0.25
         self.vx_sign = -1.0
@@ -141,6 +156,10 @@ class AlignDescendAction(ActionModule):
         self.yaw_source = "field_centerline"
         self.alignment_window: deque[bool] = deque(maxlen=self.ALIGNMENT_WINDOW_FRAMES)
         self.last_counted_frame_id: int | None = None
+        self.integral_forward = 0.0
+        self.integral_right = 0.0
+        self.last_integral_frame_id: int | None = None
+        self.last_integral_at = 0.0
 
     def _nearest_scene_target(self, scene: object) -> dict[str, float | int] | None:
         if not isinstance(scene, dict):
@@ -175,6 +194,37 @@ class AlignDescendAction(ActionModule):
                 return
             self.last_counted_frame_id = frame_id
         self.alignment_window.append(aligned)
+
+    def _reset_integral(self) -> None:
+        self.integral_forward = 0.0
+        self.integral_right = 0.0
+        self.last_integral_frame_id = None
+        self.last_integral_at = time.monotonic()
+
+    def _update_integral(self, scene: object, error_ex: float, error_ey: float) -> None:
+        """Accumulate fresh visual errors only, with bounded, sign-safe PI memory."""
+        frame_id = None
+        if isinstance(scene, dict):
+            frame_id = self._optional_int(scene.get("frame_id"))
+        if frame_id is not None and frame_id == self.last_integral_frame_id:
+            return
+
+        now = time.monotonic()
+        # Vision usually arrives much faster than the controller loop.  A capped
+        # delta avoids a scheduling pause creating a velocity jump on recovery.
+        dt = min(max(now - self.last_integral_at, 0.0), 0.2)
+        if self.integral_forward * error_ey < 0.0:
+            self.integral_forward = 0.0
+        if self.integral_right * error_ex < 0.0:
+            self.integral_right = 0.0
+        self.integral_forward = self._clamp(
+            self.integral_forward + error_ey * dt, self.integral_limit
+        )
+        self.integral_right = self._clamp(
+            self.integral_right + error_ex * dt, self.integral_limit
+        )
+        self.last_integral_frame_id = frame_id
+        self.last_integral_at = now
 
     def _fixed_yaw_rad(self, data: dict[str, Any]) -> float:
         if self.fixed_yaw_rad is None:
@@ -306,6 +356,13 @@ class AlignDescendAction(ActionModule):
             "vx_forward_mps": vx,
             "vy_right_mps": vy,
             "vz_down_mps": vz,
+            "kp_forward": self.kp_forward,
+            "kp_right": self.kp_right,
+            "ki_forward": self.ki_forward,
+            "ki_right": self.ki_right,
+            "integral_forward": self.integral_forward,
+            "integral_right": self.integral_right,
+            "integral_limit": self.integral_limit,
             "within_release_deadband": aligned,
             "alignment_window": list(self.alignment_window),
             "alignment_hits": sum(self.alignment_window),

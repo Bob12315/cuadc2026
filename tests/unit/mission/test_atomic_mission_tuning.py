@@ -22,11 +22,12 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
     assert len(generic) == len(rescue) == 2
     allowed = {
         "target_altitude_m", "descend_speed_mps", "release_deadband_ex",
-        "release_deadband_ey", "kp_forward", "kp_right", "max_vx_mps",
+        "release_deadband_ey", "release_target_ex", "release_target_ey", "kp_forward", "kp_right", "max_vx_mps",
         "max_vy_mps", "vx_sign", "vy_sign", "field_yaw_deg", "priority", "key",
     }
+    rescue_tuning = {"ki_forward", "ki_right", "integral_limit"}
     assert all(set(item) == allowed for item in generic)
-    assert all(set(item) == allowed | {"enabled", "complete_on_timeout", "yaw_speed_deg_s"} for item in rescue)
+    assert all(set(item) == allowed | rescue_tuning | {"enabled", "complete_on_timeout", "yaw_speed_deg_s"} for item in rescue)
     for item in generic:
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.24
@@ -37,9 +38,11 @@ def test_atomic_drop_alignment_tuning_is_minimal() -> None:
         assert item["complete_on_timeout"] is True
         assert item["target_altitude_m"] == 1.2
         assert item["descend_speed_mps"] == 0.30
-        assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)
-        assert (item["kp_forward"], item["kp_right"]) == (0.3, 0.3)
-        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.25, 0.25)
+        assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.05, 0.05)
+        assert (item["kp_forward"], item["kp_right"]) == (0.6, 0.6)
+        assert (item["ki_forward"], item["ki_right"]) == (0.25, 0.25)
+        assert item["integral_limit"] == 0.2
+        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.35, 0.35)
         assert item["yaw_speed_deg_s"] == 20.0
 
 
