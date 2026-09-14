@@ -14,7 +14,7 @@ overrides:
     attitude_udp_enabled: true
     attitude_udp_rate_hz: 80
   yolo:
-    model_path: "../data/models/cuadc2026-fp16.rknn"
+    model_path: "../data/models/cuadc-fp16.rknn"
     source: "/dev/v4l/by-id/usb-HD_720P_Webcam_HD_720P_Webcam_20130901-video-index0"
     camera_width: 640
     camera_height: 480

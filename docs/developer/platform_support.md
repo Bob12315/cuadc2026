@@ -5,7 +5,7 @@ RKNNLite 或 OpenCV。app 可以用 `--no-yolo-udp` 运行，此时 Web 状态�
 `perception_source=disabled`，视觉 Action 会因无效感知而安全失败，非视觉 Action 不受影响。
 
 板端 YOLO 是可选的第二个进程，只支持 Linux ARM64 的 RK3588，使用
-`rknn-toolkit-lite2` 和 `data/models/cuadc2026-fp16.rknn`。它不提供 x86、CUDA、PyTorch
+`rknn-toolkit-lite2` 和 `data/models/cuadc-fp16.rknn`。它不提供 x86、CUDA、PyTorch
 或 GPU 回退路径。
 
 ```bash

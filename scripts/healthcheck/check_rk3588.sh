@@ -35,7 +35,7 @@ case "$(uname -m)" in aarch64|arm64) ok "ARM64 architecture";; *) fail "requires
 compatible="$(tr -d '\0' </proc/device-tree/compatible 2>/dev/null || true)"
 printf '%s' "${compatible}" | grep -qi rk3588 && ok "RK3588 board identity" || fail "RK3588 identity not found"
 [[ -e /dev/rknpu || -e /dev/rknpu0 || -d /sys/kernel/debug/rknpu || -d /sys/module/rknpu || -d /sys/bus/platform/drivers/RKNPU ]] && ok "RKNN NPU device/driver" || fail "RKNN NPU device/driver missing"
-[[ -f "${REPO_ROOT}/data/models/cuadc2026-fp16.rknn" ]] && ok "FP16 RKNN deployment model" || fail "deployment model missing"
+[[ -f "${REPO_ROOT}/data/models/cuadc-fp16.rknn" ]] && ok "FP16 RKNN deployment model" || fail "deployment model missing"
 
 APP_PYTHON="$(resolve_python "${APP_PYTHON}" "${APP_ENV_NAME}")"
 YOLO_PYTHON="$(resolve_python "${YOLO_PYTHON}" "${YOLO_ENV_NAME}")"
@@ -52,7 +52,7 @@ if command -v modinfo >/dev/null 2>&1; then
 fi
 
 if [[ -x "${YOLO_PYTHON}" ]]; then
-  if "${YOLO_PYTHON}" - "${REPO_ROOT}/data/models/cuadc2026-fp16.rknn" <<'PY' >/dev/null 2>&1; then
+  if "${YOLO_PYTHON}" - "${REPO_ROOT}/data/models/cuadc-fp16.rknn" <<'PY' >/dev/null 2>&1; then
 from pathlib import Path
 import sys
 import numpy as np

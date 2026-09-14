@@ -8,7 +8,7 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN FP16 部署模型。
-model_path: "../data/models/cuadc2026-fp16.rknn"
+model_path: "../data/models/cuadc-fp16.rknn"
 
 # 每个 worker 使用一个独立 RKNN context，并依次固定到 NPU core；结果按
 # frame_id 顺序进入 tracker。暂保留 2 个 worker，USB 实测后再调优。

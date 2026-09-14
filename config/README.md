@@ -58,7 +58,7 @@ bash scripts/config/apply_rk3588_sitl.sh
 
 profile 只保存差异，通过受审 renderer 生成生效配置；不保存根配置或 Mission 模板副本。
 任何 profile 在 `executor.send_commands` 不是严格 `false` 时都拒绝应用。
-实机 profile 使用 `cuadc2026-fp16.rknn` 和实机 MAVLink/摄像头；SITL profile 使用
+实机 profile 使用 `cuadc-fp16.rknn` 和实机 MAVLink/摄像头；SITL profile 使用
 `gazebo_dataset-fp16.rknn`、UDP 14550 和仿真视频源。
 
 ## 部署

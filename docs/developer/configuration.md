@@ -57,16 +57,16 @@ python scripts/validate_action_missions.py
 当前部署模型是：
 
 ```text
-data/models/cuadc2026-fp16.rknn
+data/models/cuadc-fp16.rknn
 ```
 
 配置相对路径应为：
 
 ```yaml
-model_path: "../data/models/cuadc2026-fp16.rknn"
+model_path: "../data/models/cuadc-fp16.rknn"
 ```
 
-根 `config/yolo.yaml` 和实机 profile 使用 `cuadc2026-fp16.rknn`；SITL profile 使用
+根 `config/yolo.yaml` 和实机 profile 使用 `cuadc-fp16.rknn`；SITL profile 使用
 `gazebo_dataset-fp16.rknn`。
 
 RK3588/RKNN 可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新量化、校准并
@@ -102,8 +102,8 @@ app/YOLO 服务未重启，运行进程仍使用此前配置，不能据此宣�
 - 根 telemetry 选择 `real`/`eth`。`udpin 0.0.0.0:15001` 仍是待确认的原模板端点，
   不是已探测到的飞控设置。需确认实际插口、飞控 IP/掩码、UDP/TCP 及方向、端口；
   若采用当前 udpin 模板，飞控需要向板卡实际网口 IP 的 UDP 15001 发送 MAVLink。
-- 按实机配置说明选择 `cuadc2026-fp16.rknn`，板卡文件 SHA-256：
-  `d083cdce8a01207eafdc047e6ef34484f75cf95b28295d9719c698d2c4c80048`。
+- 按实机配置说明选择 `cuadc-fp16.rknn`，板卡文件 SHA-256：
+  `347bc25fac71f06d2a6e81dfce155b82980e315b8a337b34ad7bc97913fdaadf`。
   未并行启动第二个 NPU runtime；实际类别顺序及检测效果仍需实物验证。
 - Virtual Nadir 关闭。保留的近似标定参数仅供 SITL 使用，不能视为 USB 相机标定。
   Action Mission 中 `114.591559`/`98.864783` 视场角也尚未替换；需真实内参、安装朝向、
