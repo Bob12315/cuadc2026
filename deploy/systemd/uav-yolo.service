@@ -1,6 +1,8 @@
 [Unit]
 Description=UAV YOLO vision and MJPEG stream
 After=network.target
+Requires=uav-app.service
+After=uav-app.service
 
 [Service]
 Type=simple

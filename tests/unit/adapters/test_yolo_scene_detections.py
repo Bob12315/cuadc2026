@@ -105,6 +105,22 @@ def test_udp_publisher_envelope_contains_target_and_scene(monkeypatch) -> None:
     assert payload["payload"]["detections"][0]["track_id"] == 7
 
 
+def test_udp_publisher_repeats_hello_for_a_late_receiver(monkeypatch) -> None:
+    fake_socket = _FakeSocket()
+    monkeypatch.setattr("socket.socket", lambda *_args, **_kwargs: fake_socket)
+    monotonic_ns = iter((1_000_000_000, 1_500_000_000, 2_000_000_000))
+    monkeypatch.setattr("yolo_app.udp_publisher.time.monotonic_ns", lambda: next(monotonic_ns))
+    publisher = UdpPublisher("127.0.0.1", 5005)
+    scene = build_scene_detections([_track()], 640, 480, 10, 1.2)
+
+    publisher.publish(_target(), scene)
+    publisher.publish(_target(), scene)
+    publisher.publish(_target(), scene)
+
+    messages = [json.loads(payload.decode("utf-8"))["message_type"] for payload, _ in fake_socket.sent]
+    assert messages == ["hello", "perception", "perception", "hello", "perception"]
+
+
 def test_udp_publisher_rejects_torn_target_scene_frame(monkeypatch) -> None:
     fake_socket = _FakeSocket(); monkeypatch.setattr("socket.socket", lambda *_a, **_k: fake_socket)
     publisher = UdpPublisher("127.0.0.1", 5005)

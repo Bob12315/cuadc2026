@@ -13,6 +13,8 @@ except ImportError:
 
 
 class UdpPublisher:
+    HELLO_INTERVAL_NS = 1_000_000_000
+
     def __init__(self, udp_ip: str, udp_port: int, *, max_datagram_bytes: int = 60_000,
                  max_detections: int = 128) -> None:
         self.addr = (udp_ip, udp_port)
@@ -24,21 +26,16 @@ class UdpPublisher:
             raise ValueError("invalid YOLO UDP bounds")
         self.max_datagram_bytes = int(max_datagram_bytes)
         self.max_detections = int(max_detections)
-        self._hello_sent = False
+        self._last_hello_monotonic_ns: int | None = None
         self._sequence = 0
 
     def publish(self, target: CurrentTarget, scene: SceneDetections | None = None,
                 recorder_status: object | None = None,
                 captured_at_monotonic_ns: int | None = None) -> None:
         now_monotonic_ns = time.monotonic_ns()
-        if not self._hello_sent:
-            self._send({"schema_major": 2, "schema_minor": 0, "message_type": "hello",
-                        "sequence": 0, "sent_at_utc": datetime.now(timezone.utc).isoformat(),
-                        "sent_at_monotonic_ns": now_monotonic_ns, "ttl_ms": 2000,
-                        "producer_id": self.producer_id, "yolo_process_session_id": self.process_session_id,
-                        "producer_clock_domain_id": self.clock_domain_id,
-                        "payload": {"capabilities": ["perception_v2", "vision_command_v2", "recording_status_v2"]}})
-            self._hello_sent = True
+        if (self._last_hello_monotonic_ns is None
+                or now_monotonic_ns - self._last_hello_monotonic_ns >= self.HELLO_INTERVAL_NS):
+            self._send_hello(now_monotonic_ns)
         scene_data = scene.to_dict() if scene is not None else {}
         if scene is not None and (
             int(scene_data.get("frame_id", -1)) != int(target.frame_id)
@@ -88,6 +85,15 @@ class UdpPublisher:
         if len(payload) > self.max_datagram_bytes:
             raise ValueError("hello datagram exceeds max_datagram_bytes")
         self.sock.sendto(payload, self.addr)
+
+    def _send_hello(self, now_monotonic_ns: int) -> None:
+        self._send({"schema_major": 2, "schema_minor": 0, "message_type": "hello",
+                    "sequence": 0, "sent_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "sent_at_monotonic_ns": now_monotonic_ns, "ttl_ms": 2000,
+                    "producer_id": self.producer_id, "yolo_process_session_id": self.process_session_id,
+                    "producer_clock_domain_id": self.clock_domain_id,
+                    "payload": {"capabilities": ["perception_v2", "vision_command_v2", "recording_status_v2"]}})
+        self._last_hello_monotonic_ns = now_monotonic_ns
 
     def close(self) -> None:
         self.sock.close()
