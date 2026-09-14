@@ -110,7 +110,7 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
         for step in drop_aligns
     )
     approaches = [step for step in steps if step.get("label") in {"drop_1_approach", "drop_2_approach"}]
-    assert [step["params"]["altitude_m"] for step in approaches] == [2.5, 2.5]
+    assert [step["params"]["altitude_m"] for step in approaches] == [3.0, 3.0]
     drop_center = by_label["goto_drop_center_4_5m"]
     assert drop_center["name"] == "goto_waypoint"
     assert drop_center["params"]["x"] == 0
@@ -143,8 +143,8 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
 def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> None:
     steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
     camera = {
-        "fov_x_deg": 114.591559,
-        "fov_y_deg": 98.864783,
+        "fov_x_deg": 142.964844,
+        "fov_y_deg": 131.870643,
         "image_x_sign": 1,
         "image_y_sign": -1,
     }

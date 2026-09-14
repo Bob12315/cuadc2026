@@ -73,8 +73,8 @@
         ],
         "min_confidence": 0.3,
         "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
+          "fov_x_deg": 142.964844,
+          "fov_y_deg": 131.870643,
           "image_x_sign": 1,
           "image_y_sign": -1
         }
@@ -190,7 +190,7 @@
       },
       "params": {
         "target": "$drop_targets.target_slots.0",
-        "altitude_m": 2.5,
+        "altitude_m": 3.0,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "field_heading",
@@ -278,7 +278,7 @@
       },
       "params": {
         "target": "$drop_targets.target_slots.1",
-        "altitude_m": 2.5,
+        "altitude_m": 3.0,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "field_heading",
