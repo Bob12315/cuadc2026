@@ -97,6 +97,33 @@ def test_goto_reaches_target_and_releases_active_action() -> None:
     assert status["last_terminal"]["state"] == "succeeded"
 
 
+def test_goto_holds_the_reached_target_for_configured_settle_time() -> None:
+    service = _runtime()
+    service.start("goto_waypoint", _params(min_hold_updates=1, settle_time_s=2.0))
+
+    settling = service.tick(
+        _context(now=0.0), link_manager=None, send_commands=False
+    )
+    assert settling["state"] == "running"
+    assert service.last_result is not None
+    assert service.last_result["reason"] == "waypoint_settling"
+    assert service.last_result["detail"]["settle_active"] is True
+
+    still_settling = service.tick(
+        _context(now=1.99), link_manager=None, send_commands=False
+    )
+    assert still_settling["state"] == "running"
+    assert service.last_result is not None
+    assert service.last_result["reason"] == "waypoint_settling"
+
+    complete = service.tick(
+        _context(now=2.0), link_manager=None, send_commands=False
+    )
+    assert complete["state"] == "succeeded"
+    assert service.last_result is not None
+    assert service.last_result["reason"] == "waypoint_reached"
+
+
 def test_goto_small_speed_spike_decays_instead_of_resetting_reach_progress() -> None:
     action = GotoWaypointAction()
     action.start(_params())

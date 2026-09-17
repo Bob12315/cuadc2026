@@ -50,6 +50,23 @@ def test_every_template_takeoff_uses_the_field_centerline_default() -> None:
         assert takeoffs[0]["params"]["takeoff_yaw_deg"] is None
 
 
+def test_full_auto_mission_settles_after_takeoff_and_each_goto() -> None:
+    mission = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")
+    expected = {
+        "takeoff_4_5m",
+        "goto_drop_center_4_5m",
+        "drop_1_approach",
+        "drop_2_approach",
+        "goto_recon_entry_4m",
+        "return_home_gps",
+    }
+    for step in mission["steps"]:
+        if step.get("label") in expected:
+            assert step["params"]["settle_time_s"] == 1.0
+        elif step["name"] in {"takeoff", "goto_waypoint"}:
+            assert "settle_time_s" not in step["params"]
+
+
 def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -> None:
     steps = _load(ROOT / "config/action_missions/drop_two_targets.json")["steps"]
     names = [step["name"] for step in steps]
@@ -117,15 +134,15 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     assert drop_center["params"]["y"] == 32.5
     assert drop_center["params"]["altitude_m"] == 4.5
     assert drop_center["params"]["require_velocity_valid"] is True
-    assert drop_center["params"]["tolerance_xy_m"] == 0.15
-    assert drop_center["params"]["tolerance_z_m"] == 0.15
-    assert drop_center["params"]["max_horizontal_speed_mps"] == 0.10
-    assert drop_center["params"]["max_vertical_speed_mps"] == 0.05
-    assert drop_center["params"]["min_hold_updates"] == 10
-    assert drop_center["params"]["position_hysteresis_xy_m"] == 0.05
-    assert drop_center["params"]["position_hysteresis_z_m"] == 0.05
-    assert drop_center["params"]["horizontal_speed_hysteresis_mps"] == 0.05
-    assert drop_center["params"]["vertical_speed_hysteresis_mps"] == 0.03
+    assert drop_center["params"]["tolerance_xy_m"] == 0.30
+    assert drop_center["params"]["tolerance_z_m"] == 0.30
+    assert drop_center["params"]["max_horizontal_speed_mps"] == 0.25
+    assert drop_center["params"]["max_vertical_speed_mps"] == 0.15
+    assert drop_center["params"]["min_hold_updates"] == 4
+    assert drop_center["params"]["position_hysteresis_xy_m"] == 0.20
+    assert drop_center["params"]["position_hysteresis_z_m"] == 0.10
+    assert drop_center["params"]["horizontal_speed_hysteresis_mps"] == 0.10
+    assert drop_center["params"]["vertical_speed_hysteresis_mps"] == 0.05
     assert [step["label"] for step in steps if step["label"].startswith("drop_scan_goto")] == []
 
     captures = [step for step in steps if step["name"] == "gps_capture_view"]
@@ -198,22 +215,16 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_1_align"]["params"]["release_deadband_ey"] == 0.05
     assert by_label["drop_2_align"]["params"]["release_deadband_ex"] == 0.05
     assert by_label["drop_2_align"]["params"]["release_deadband_ey"] == 0.05
-    assert by_label["drop_1_align"]["params"]["kp_forward"] == 0.5
-    assert by_label["drop_1_align"]["params"]["kp_right"] == 0.5
-    assert by_label["drop_1_align"]["params"]["ki_forward"] == 0.05
-    assert by_label["drop_1_align"]["params"]["ki_right"] == 0.05
-    assert by_label["drop_1_align"]["params"]["integral_limit"] == 0.08
-    assert by_label["drop_1_align"]["params"]["max_vx_mps"] == 0.25
-    assert by_label["drop_1_align"]["params"]["max_vy_mps"] == 0.25
-    assert by_label["drop_2_align"]["params"]["kp_forward"] == 0.5
-    assert by_label["drop_2_align"]["params"]["kp_right"] == 0.5
-    assert by_label["drop_2_align"]["params"]["ki_forward"] == 0.05
-    assert by_label["drop_2_align"]["params"]["ki_right"] == 0.05
-    assert by_label["drop_2_align"]["params"]["integral_limit"] == 0.08
-    assert by_label["drop_2_align"]["params"]["max_vx_mps"] == 0.25
-    assert by_label["drop_2_align"]["params"]["max_vy_mps"] == 0.25
-    assert by_label["drop_1_align"]["params"]["release_target_ey"] == 0.0
-    assert by_label["drop_2_align"]["params"]["release_target_ey"] == 0.0
+    for label in ("drop_1_align", "drop_2_align"):
+        params = by_label[label]["params"]
+        assert (params["kp_forward"], params["kp_right"]) == (0.35, 0.4)
+        assert (params["final_kp_forward"], params["final_kp_right"]) == (0.25, 0.3)
+        assert (params["ki_forward"], params["ki_right"]) == (0.0, 0.0)
+        assert params["integral_limit"] == 0.0
+        assert (params["max_vx_mps"], params["max_vy_mps"]) == (0.3, 0.3)
+        assert (params["final_max_vx_mps"], params["final_max_vy_mps"]) == (0.15, 0.15)
+    assert by_label["drop_1_align"]["params"]["release_target_ey"] == 0.3
+    assert by_label["drop_2_align"]["params"]["release_target_ey"] == -0.2
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"
     assert by_label["drop_1_align"]["params"]["complete_on_timeout"] is True
     assert by_label["drop_2_align"]["params"]["complete_on_timeout"] is True

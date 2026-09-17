@@ -31,6 +31,73 @@
   function _dom() { return cfg.dom || window.UavDom; }
   function _setHint(text) { if (typeof cfg.setCompletionHint === "function") cfg.setCompletionHint(text); }
 
+  function _shownVideoBounds(scene, rect) {
+    var sourceRatio = scene.image_width / scene.image_height;
+    var boxRatio = rect.width / rect.height;
+    var width = sourceRatio > boxRatio ? rect.width : rect.height * sourceRatio;
+    var height = sourceRatio > boxRatio ? rect.width / sourceRatio : rect.height;
+    return {
+      x: (rect.width - width) / 2,
+      y: (rect.height - height) / 2,
+      width: width,
+      height: height,
+    };
+  }
+
+  function _finalHeightAlignmentTarget(payload) {
+    var actionLab = (payload || {}).action_lab || {};
+    var status = actionLab.status || actionLab;
+    var result = status.last_result || {};
+    var detail = result.detail || {};
+    if (!status.running || status.action_name !== "align_descend") return null;
+    if (detail.speed_control_phase !== "final_altitude" || detail.release_offset_active !== true) return null;
+    var ex = Number(detail.release_target_ex);
+    var ey = Number(detail.release_target_ey);
+    if (!Number.isFinite(ex) || !Number.isFinite(ey) || Math.abs(ex) > 1 || Math.abs(ey) > 1) return null;
+    return {ex: ex, ey: ey};
+  }
+
+  function renderAlignmentTarget(payload) {
+    var canvas = _dom().$("hitCanvas");
+    if (!canvas) return;
+    var rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    var pixelRatio = window.devicePixelRatio || 1;
+    var width = Math.round(rect.width * pixelRatio);
+    var height = Math.round(rect.height * pixelRatio);
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    var context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, rect.width, rect.height);
+
+    var scene = (payload || {}).scene || {};
+    var target = _finalHeightAlignmentTarget(payload);
+    if (!target || !Number(scene.image_width) || !Number(scene.image_height)) return;
+
+    var bounds = _shownVideoBounds(scene, rect);
+    var x = bounds.x + (target.ex + 1) * 0.5 * bounds.width;
+    var y = bounds.y + (target.ey + 1) * 0.5 * bounds.height;
+    context.strokeStyle = "#ff3030";
+    context.fillStyle = "#ff3030";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(x, y, 7, 0, Math.PI * 2);
+    context.stroke();
+    context.beginPath();
+    context.arc(x, y, 2.5, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.moveTo(x - 11, y);
+    context.lineTo(x + 11, y);
+    context.moveTo(x, y - 11);
+    context.lineTo(x, y + 11);
+    context.stroke();
+  }
+
   function getLatestCameraRecording() { return videoState.latestCameraRecording; }
 
   // Camera recording render + refresh + toggle
@@ -79,17 +146,12 @@
     var img = _dom().$("video");
     if (!scene.image_width || !scene.image_height) return;
     var rect = img.getBoundingClientRect();
-    var sourceRatio = scene.image_width / scene.image_height;
-    var boxRatio = rect.width / rect.height;
-    var shownWidth = sourceRatio > boxRatio ? rect.width : rect.height * sourceRatio;
-    var shownHeight = sourceRatio > boxRatio ? rect.width / sourceRatio : rect.height;
-    var offsetX = (rect.width - shownWidth) / 2;
-    var offsetY = (rect.height - shownHeight) / 2;
-    var displayX = event.clientX - rect.left - offsetX;
-    var displayY = event.clientY - rect.top - offsetY;
-    if (displayX < 0 || displayY < 0 || displayX > shownWidth || displayY > shownHeight) return;
-    var x = displayX * scene.image_width / shownWidth;
-    var y = displayY * scene.image_height / shownHeight;
+    var bounds = _shownVideoBounds(scene, rect);
+    var displayX = event.clientX - rect.left - bounds.x;
+    var displayY = event.clientY - rect.top - bounds.y;
+    if (displayX < 0 || displayY < 0 || displayX > bounds.width || displayY > bounds.height) return;
+    var x = displayX * scene.image_width / bounds.width;
+    var y = displayY * scene.image_height / bounds.height;
     var hits = (scene.detections || []).filter(function (d) { return x >= d.x1 && x <= d.x2 && y >= d.y1 && y <= d.y2; });
     if (!hits.length) {
       _setHint("点击位置没有可锁定目标");
@@ -146,6 +208,7 @@
     toggleCameraRecording: toggleCameraRecording,
     resetVirtualNadir: resetVirtualNadir,
     renderCameraRecordingStatus: renderCameraRecordingStatus,
+    renderAlignmentTarget: renderAlignmentTarget,
     clickVideo: clickVideo,
     setupVideoPanel: setupVideoPanel,
   };

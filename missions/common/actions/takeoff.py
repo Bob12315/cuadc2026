@@ -88,6 +88,9 @@ class TakeoffAction(ActionModule):
         self.yaw_speed_deg_s = self._positive_finite(
             data.get("yaw_speed_deg_s", 20.0), "yaw_speed_deg_s"
         )
+        self.settle_time_s = self._non_negative_finite(
+            data.get("settle_time_s", 0.0), "settle_time_s"
+        )
         self.started_monotonic_s = time.monotonic()
         self.priority = int(data.get("priority", 2))
         self.arm_priority = int(data.get("arm_priority", 1))
@@ -108,6 +111,7 @@ class TakeoffAction(ActionModule):
         self.yaw_reached_updates = 0
         self.yaw_target_rad: float | None = None
         self.yaw_alignment_started_monotonic_s: float | None = None
+        self.completion_settle_started_monotonic_s: float | None = None
         self.last_detail = self._detail()
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
@@ -199,6 +203,9 @@ class TakeoffAction(ActionModule):
         if self.phase == "wait_altitude":
             return self._wait_for_takeoff_completion(altitude, context_data)
 
+        if self.phase == "settle":
+            return self._wait_after_takeoff_completion(altitude, context_data)
+
         return ActionResult(failed=True, reason="invalid_takeoff_phase", detail=self._detail(altitude, context=context_data))
 
     def stop(self) -> None:
@@ -233,8 +240,10 @@ class TakeoffAction(ActionModule):
         self.yaw_min_hold_updates = 2
         self.yaw_timeout_s = 12.0
         self.yaw_speed_deg_s = 20.0
+        self.settle_time_s = 0.0
         self.started_monotonic_s: float | None = None
         self.takeoff_started_monotonic_s: float | None = None
+        self.completion_settle_started_monotonic_s: float | None = None
         self.priority = 2
         self.arm_priority = 1
         self.mode_priority = 2
@@ -289,21 +298,50 @@ class TakeoffAction(ActionModule):
         detail = self._detail(altitude, reached=reached_altitude, context=context)
         self.last_detail = detail
         if yaw_reached:
-            self.done = True
-            self.phase = "done"
-            reason = (
-                "takeoff_altitude_reached"
-                if self.yaw_mode == "hold"
-                else "takeoff_field_heading_reached"
-            )
-            _LOG.info(
-                "guided takeoff complete: alt=%.2fm yaw=%.1fdeg source=%s",
-                altitude.value_m,
-                math.degrees(self.yaw_target_rad) % 360.0 if self.yaw_target_rad is not None else float("nan"),
-                self.yaw_source,
-            )
-            return ActionResult(done=True, reason=reason, detail=detail)
+            if self.settle_time_s > 0.0:
+                self.phase = "settle"
+                self.completion_settle_started_monotonic_s = time.monotonic()
+                detail = self._detail(altitude, phase="settle", reached=True, context=context)
+                self.last_detail = detail
+                _LOG.info("guided takeoff settling: hold=%.2fs", self.settle_time_s)
+                return ActionResult(reason="takeoff_settling", detail=detail)
+            return self._finish_takeoff(altitude, context)
         return ActionResult(reason="waiting_for_field_heading_yaw", detail=detail)
+
+    def _wait_after_takeoff_completion(
+        self,
+        altitude: _AltitudeSample | None,
+        context: dict[str, Any],
+    ) -> ActionResult:
+        """Keep the completed takeoff active without reissuing yaw commands."""
+        assert self.completion_settle_started_monotonic_s is not None
+        if time.monotonic() - self.completion_settle_started_monotonic_s < self.settle_time_s:
+            detail = self._detail(altitude, phase="settle", reached=True, context=context)
+            self.last_detail = detail
+            return ActionResult(reason="takeoff_settling", detail=detail)
+        return self._finish_takeoff(altitude, context)
+
+    def _finish_takeoff(
+        self,
+        altitude: _AltitudeSample,
+        context: dict[str, Any],
+    ) -> ActionResult:
+        self.done = True
+        self.phase = "done"
+        reason = (
+            "takeoff_altitude_reached"
+            if self.yaw_mode == "hold"
+            else "takeoff_field_heading_reached"
+        )
+        detail = self._detail(altitude, phase="done", reached=True, context=context)
+        self.last_detail = detail
+        _LOG.info(
+            "guided takeoff complete: alt=%.2fm yaw=%.1fdeg source=%s",
+            altitude.value_m,
+            math.degrees(self.yaw_target_rad) % 360.0 if self.yaw_target_rad is not None else float("nan"),
+            self.yaw_source,
+        )
+        return ActionResult(done=True, reason=reason, detail=detail)
 
     def _update_yaw_lock(
         self,
@@ -494,6 +532,9 @@ class TakeoffAction(ActionModule):
             "yaw_sent": self.yaw_sent,
             "yaw_timeout_s": self.yaw_timeout_s,
             "yaw_alignment_elapsed_s": self._yaw_alignment_elapsed_s(),
+            "settle_time_s": self.settle_time_s,
+            "settle_elapsed_s": self._completion_settle_elapsed_s(),
+            "settle_active": self.phase == "settle",
         }
         for name in (
             "field_heading_confirmed",
@@ -555,6 +596,11 @@ class TakeoffAction(ActionModule):
         if self.yaw_alignment_started_monotonic_s is None:
             return None
         return max(0.0, time.monotonic() - self.yaw_alignment_started_monotonic_s)
+
+    def _completion_settle_elapsed_s(self) -> float:
+        if self.completion_settle_started_monotonic_s is None:
+            return 0.0
+        return max(0.0, time.monotonic() - self.completion_settle_started_monotonic_s)
 
     @staticmethod
     def _normalize_yaw(yaw_rad: float) -> float:
@@ -620,4 +666,11 @@ class TakeoffAction(ActionModule):
         result = cls._finite_required(value, name)
         if result <= 0.0:
             raise ValueError(f"{name} must be positive")
+        return result
+
+    @classmethod
+    def _non_negative_finite(cls, value: Any, name: str) -> float:
+        result = cls._finite_required(value, name)
+        if result < 0.0:
+            raise ValueError(f"{name} must be non-negative")
         return result

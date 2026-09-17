@@ -1,4 +1,4 @@
-"""Continuously align to the scene target nearest the image centre and descend."""
+"""Lock a scene target by track ID and image-position continuity, then descend."""
 from __future__ import annotations
 
 import math
@@ -11,7 +11,7 @@ from contracts.effects import ConditionYaw, FlightCommand
 from .base import ActionModule
 from .result import ActionResult
 class AlignDescendAction(ActionModule):
-    """Align to the nearest scene target until the low-altitude vote succeeds."""
+    """Align to one tracked scene target until the low-altitude vote succeeds."""
 
     TIMEOUT_S = 30.0
     ALIGNMENT_WINDOW_FRAMES = 5
@@ -32,11 +32,23 @@ class AlignDescendAction(ActionModule):
         self.release_target_ey = self._finite(data.get("release_target_ey", 0.0), "release_target_ey")
         self.kp_forward = self._non_negative(data.get("kp_forward", 0.3), "kp_forward")
         self.kp_right = self._non_negative(data.get("kp_right", 0.3), "kp_right")
+        self.final_kp_forward = self._non_negative(
+            data.get("final_kp_forward", self.kp_forward), "final_kp_forward"
+        )
+        self.final_kp_right = self._non_negative(
+            data.get("final_kp_right", self.kp_right), "final_kp_right"
+        )
         self.ki_forward = self._non_negative(data.get("ki_forward", 0.0), "ki_forward")
         self.ki_right = self._non_negative(data.get("ki_right", 0.0), "ki_right")
         self.integral_limit = self._non_negative(data.get("integral_limit", 0.25), "integral_limit")
         self.max_vx_mps = self._positive(data.get("max_vx_mps", 0.25), "max_vx_mps")
         self.max_vy_mps = self._positive(data.get("max_vy_mps", 0.25), "max_vy_mps")
+        self.final_max_vx_mps = self._positive(
+            data.get("final_max_vx_mps", self.max_vx_mps), "final_max_vx_mps"
+        )
+        self.final_max_vy_mps = self._positive(
+            data.get("final_max_vy_mps", self.max_vy_mps), "final_max_vy_mps"
+        )
         self.vx_sign = self._unit_sign(data.get("vx_sign", -1.0), "vx_sign")
         self.vy_sign = self._unit_sign(data.get("vy_sign", 1.0), "vy_sign")
         self.field_yaw_deg = self._finite(data.get("field_yaw_deg", 0.0), "field_yaw_deg")
@@ -52,6 +64,11 @@ class AlignDescendAction(ActionModule):
         self.yaw_source = "explicit" if self.desired_yaw_deg is not None else "field_centerline"
         self.alignment_window.clear()
         self.last_counted_frame_id = None
+        self.final_altitude_latched = False
+        self.locked_target_track_id = None
+        self.locked_target_ex = None
+        self.locked_target_ey = None
+        self.target_lock_state = "waiting_for_target"
         self._reset_integral()
         self.started = True
         self.stopped = False
@@ -73,33 +90,42 @@ class AlignDescendAction(ActionModule):
             )
 
         scene = data.get("scene")
-        target = self._nearest_scene_target(scene)
         altitude = self._altitude(data)
+        # The vehicle's height controller may briefly rise after it starts
+        # holding the final height.  Once reached, keep the final-height mode
+        # latched for this action instead of reissuing a descent command.
+        if altitude is not None and 0.0 < altitude <= self.target_altitude_m:
+            self.final_altitude_latched = True
+        target = self._locked_scene_target(scene)
         if target is None or altitude is None or altitude <= 0.0:
             self._reset_integral()
-            if altitude is not None and altitude <= self.target_altitude_m:
+            if self.final_altitude_latched:
                 self._record_alignment_frame(scene, False)
             reason = "target_not_found" if target is None else "altitude_unavailable"
             return self._holding(reason, yaw_rad=yaw, altitude_m=altitude)
 
         ex, ey = target["ex"], target["ey"]
-        release_offset_active = altitude <= self.target_altitude_m
+        release_offset_active = self.final_altitude_latched
         release_target_ex = self.release_target_ex if release_offset_active else 0.0
         release_target_ey = self.release_target_ey if release_offset_active else 0.0
         alignment_ex = ex - release_target_ex
         alignment_ey = ey - release_target_ey
         self._update_integral(scene, alignment_ex, alignment_ey)
+        kp_forward = self.final_kp_forward if release_offset_active else self.kp_forward
+        kp_right = self.final_kp_right if release_offset_active else self.kp_right
+        max_vx_mps = self.final_max_vx_mps if release_offset_active else self.max_vx_mps
+        max_vy_mps = self.final_max_vy_mps if release_offset_active else self.max_vy_mps
         vx = self._clamp(
-            self.vx_sign * (self.kp_forward * alignment_ey + self.ki_forward * self.integral_forward),
-            self.max_vx_mps,
+            self.vx_sign * (kp_forward * alignment_ey + self.ki_forward * self.integral_forward),
+            max_vx_mps,
         )
         vy = self._clamp(
-            self.vy_sign * (self.kp_right * alignment_ex + self.ki_right * self.integral_right),
-            self.max_vy_mps,
+            self.vy_sign * (kp_right * alignment_ex + self.ki_right * self.integral_right),
+            max_vy_mps,
         )
         aligned = abs(alignment_ex) <= self.release_deadband_ex and abs(alignment_ey) <= self.release_deadband_ey
 
-        if altitude <= self.target_altitude_m:
+        if self.final_altitude_latched:
             vz = 0.0
             self._record_alignment_frame(scene, aligned)
             if len(self.alignment_window) == self.ALIGNMENT_WINDOW_FRAMES and sum(self.alignment_window) >= self.ALIGNMENT_REQUIRED_FRAMES:
@@ -139,11 +165,15 @@ class AlignDescendAction(ActionModule):
         self.release_deadband_ey = 0.1
         self.kp_forward = 0.3
         self.kp_right = 0.3
+        self.final_kp_forward = 0.3
+        self.final_kp_right = 0.3
         self.ki_forward = 0.0
         self.ki_right = 0.0
         self.integral_limit = 0.25
         self.max_vx_mps = 0.25
         self.max_vy_mps = 0.25
+        self.final_max_vx_mps = 0.25
+        self.final_max_vy_mps = 0.25
         self.vx_sign = -1.0
         self.vy_sign = 1.0
         self.field_yaw_deg = 0.0
@@ -156,34 +186,79 @@ class AlignDescendAction(ActionModule):
         self.yaw_source = "field_centerline"
         self.alignment_window: deque[bool] = deque(maxlen=self.ALIGNMENT_WINDOW_FRAMES)
         self.last_counted_frame_id: int | None = None
+        self.final_altitude_latched = False
+        self.locked_target_track_id: int | None = None
+        self.locked_target_ex: float | None = None
+        self.locked_target_ey: float | None = None
+        self.target_lock_state = "not_started"
         self.integral_forward = 0.0
         self.integral_right = 0.0
         self.last_integral_frame_id: int | None = None
         self.last_integral_at = 0.0
 
-    def _nearest_scene_target(self, scene: object) -> dict[str, float | int] | None:
-        if not isinstance(scene, dict):
+    def _locked_scene_target(self, scene: object) -> dict[str, float | int] | None:
+        candidates = self._scene_targets(scene)
+        if not candidates:
+            self.target_lock_state = (
+                "locked_target_not_visible"
+                if self.locked_target_track_id is not None
+                else "target_not_found"
+            )
             return None
+
+        if self.locked_target_track_id is not None:
+            for _, candidate in candidates:
+                if candidate.get("track_id") == self.locked_target_track_id:
+                    self.target_lock_state = "locked"
+                    self._remember_locked_target(candidate)
+                    return candidate
+
+        had_locked_position = (
+            self.locked_target_ex is not None and self.locked_target_ey is not None
+        )
+        if had_locked_position:
+            _, target = min(
+                candidates,
+                key=lambda item: (
+                    (float(item[1]["ex"]) - self.locked_target_ex) ** 2
+                    + (float(item[1]["ey"]) - self.locked_target_ey) ** 2
+                ),
+            )
+            self.target_lock_state = "relocked_nearest_position"
+        else:
+            _, target = min(candidates, key=lambda item: item[0])
+            self.target_lock_state = "acquired"
+        self._remember_locked_target(target)
+        return target
+
+    def _remember_locked_target(self, target: dict[str, float | int]) -> None:
+        self.locked_target_ex = float(target["ex"])
+        self.locked_target_ey = float(target["ey"])
+        track_id = target.get("track_id")
+        self.locked_target_track_id = None if track_id is None else int(track_id)
+
+    @classmethod
+    def _scene_targets(cls, scene: object) -> list[tuple[float, dict[str, float | int]]]:
+        if not isinstance(scene, dict):
+            return []
         detections = scene.get("detections")
         if not isinstance(detections, list):
-            return None
+            return []
 
         candidates: list[tuple[float, dict[str, float | int]]] = []
         for detection in detections:
             if not isinstance(detection, dict):
                 continue
-            ex = self._optional_finite(detection.get("ex"))
-            ey = self._optional_finite(detection.get("ey"))
+            ex = cls._optional_finite(detection.get("ex"))
+            ey = cls._optional_finite(detection.get("ey"))
             if ex is None or ey is None:
                 continue
             candidate: dict[str, float | int] = {"ex": ex, "ey": ey}
-            track_id = self._optional_int(detection.get("track_id"))
+            track_id = cls._optional_int(detection.get("track_id"))
             if track_id is not None:
                 candidate["track_id"] = track_id
             candidates.append((ex * ex + ey * ey, candidate))
-        if not candidates:
-            return None
-        return min(candidates, key=lambda item: item[0])[1]
+        return candidates
 
     def _record_alignment_frame(self, scene: object, aligned: bool) -> None:
         frame_id = None
@@ -325,20 +400,32 @@ class AlignDescendAction(ActionModule):
         vz: float,
         aligned: bool,
     ) -> dict[str, Any]:
-        release_offset_active = altitude is not None and 0.0 < altitude <= self.target_altitude_m
+        release_offset_active = self.final_altitude_latched
         release_target_ex = self.release_target_ex if release_offset_active else 0.0
         release_target_ey = self.release_target_ey if release_offset_active else 0.0
         alignment_error_ex = None if target is None else target["ex"] - release_target_ex
         alignment_error_ey = None if target is None else target["ey"] - release_target_ey
+        active_max_vx_mps = self.final_max_vx_mps if release_offset_active else self.max_vx_mps
+        active_max_vy_mps = self.final_max_vy_mps if release_offset_active else self.max_vy_mps
+        active_kp_forward = self.final_kp_forward if release_offset_active else self.kp_forward
+        active_kp_right = self.final_kp_right if release_offset_active else self.kp_right
         return {
             "state": reason,
             "release_offset_active": release_offset_active,
+            "speed_control_phase": "final_altitude" if release_offset_active else "descending",
+            "final_altitude_latched": self.final_altitude_latched,
             "release_target_ex": release_target_ex,
             "release_target_ey": release_target_ey,
             "alignment_error_ex": alignment_error_ex,
             "alignment_error_ey": alignment_error_ey,
             "enabled": self.enabled,
             "complete_on_timeout": self.complete_on_timeout,
+            "target_lock_enabled": True,
+            "target_lock_mode": "track_id_or_nearest_previous_position",
+            "locked_target_track_id": self.locked_target_track_id,
+            "locked_target_ex": self.locked_target_ex,
+            "locked_target_ey": self.locked_target_ey,
+            "target_lock_state": self.target_lock_state,
             "target_track_id": None if target is None else target.get("track_id"),
             "ex": None if target is None else target["ex"],
             "ey": None if target is None else target["ey"],
@@ -358,11 +445,21 @@ class AlignDescendAction(ActionModule):
             "vz_down_mps": vz,
             "kp_forward": self.kp_forward,
             "kp_right": self.kp_right,
+            "final_kp_forward": self.final_kp_forward,
+            "final_kp_right": self.final_kp_right,
+            "active_kp_forward": active_kp_forward,
+            "active_kp_right": active_kp_right,
             "ki_forward": self.ki_forward,
             "ki_right": self.ki_right,
             "integral_forward": self.integral_forward,
             "integral_right": self.integral_right,
             "integral_limit": self.integral_limit,
+            "max_vx_mps": self.max_vx_mps,
+            "max_vy_mps": self.max_vy_mps,
+            "final_max_vx_mps": self.final_max_vx_mps,
+            "final_max_vy_mps": self.final_max_vy_mps,
+            "active_max_vx_mps": active_max_vx_mps,
+            "active_max_vy_mps": active_max_vy_mps,
             "within_release_deadband": aligned,
             "alignment_window": list(self.alignment_window),
             "alignment_hits": sum(self.alignment_window),

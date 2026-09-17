@@ -48,11 +48,15 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
     align["release_target_ey"] = 0.0
     align["kp_forward"] = 0.3
     align["kp_right"] = 0.3
+    align["final_kp_forward"] = 0.3
+    align["final_kp_right"] = 0.3
     align["ki_forward"] = 0.0
     align["ki_right"] = 0.0
     align["integral_limit"] = 0.25
     align["max_vx_mps"] = 0.25
     align["max_vy_mps"] = 0.25
+    align["final_max_vx_mps"] = 0.25
+    align["final_max_vy_mps"] = 0.25
     assert definitions["align_descend"].default_params == align
 
     goto = definitions["goto_waypoint"].default_params

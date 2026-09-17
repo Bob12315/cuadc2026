@@ -47,6 +47,15 @@ def test_api_client_is_only_fetch_owner() -> None:
     assert [path.name for path in owners] == ["api_client.js"]
 
 
+def test_video_panel_draws_the_final_height_drop_offset_marker_only() -> None:
+    source = (STATIC / "js/video_panel.js").read_text()
+    assert 'detail.speed_control_phase !== "final_altitude"' in source
+    assert 'detail.release_offset_active !== true' in source
+    assert 'detail.release_target_ex' in source
+    assert 'detail.release_target_ey' in source
+    assert 'context.strokeStyle = "#ff3030"' in source
+
+
 def test_start_uses_the_editor_mission_revision() -> None:
     source = (STATIC / "js/control.js").read_text()
     start = source[source.index("async function startActionMission()"):source.index("async function stopActionMission()")]

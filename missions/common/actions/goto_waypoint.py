@@ -103,6 +103,13 @@ class GotoWaypointAction(ActionModule):
         self.max_duration_s = self._positive_float(
             data.get("max_duration_s", 180.0), "max_duration_s"
         )
+        # Keep the final global target active briefly after the normal arrival
+        # gate passes.  This is mission-configurable because a scan/drop
+        # workflow needs a deliberate settle, while an interactive goto does
+        # not necessarily need one.
+        self.settle_time_s = self._non_negative_float(
+            data.get("settle_time_s", 0.0), "settle_time_s"
+        )
         self.priority = int(data.get("priority", 4))
         self.key = str(data.get("key") or "goto_field_gps").strip() or "goto_field_gps"
         self.started, self.stopped, self.reached_updates = True, False, 0
@@ -113,6 +120,7 @@ class GotoWaypointAction(ActionModule):
         self.control_reject_elapsed_s = 0.0
         self.started_monotonic = None
         self.last_now_monotonic = None
+        self.arrival_settle_started_monotonic: float | None = None
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:
@@ -178,6 +186,18 @@ class GotoWaypointAction(ActionModule):
                 reason=self.control_reject_reason or "control_not_allowed",
                 detail=detail,
             )
+        if self.arrival_settle_started_monotonic is not None:
+            detail = self._detail(target, yaw_rad, None, None, None)
+            settle_elapsed_s = max(
+                0.0, now_monotonic - self.arrival_settle_started_monotonic
+            )
+            if settle_elapsed_s >= self.settle_time_s:
+                return ActionResult(done=True, reason="waypoint_reached", detail=detail)
+            return ActionResult(
+                effects=ActionResult.typed([self._effect(target, yaw_rad, context_data)]),
+                reason="waypoint_settling",
+                detail=detail,
+            )
         current = self._current_global_position(context_data)
         if current is None:
             return ActionResult(
@@ -212,6 +232,14 @@ class GotoWaypointAction(ActionModule):
             self.reached_update_action = "reset"
         detail = self._detail(target, yaw_rad, current, distance, z_error, velocity)
         if self.reached_updates >= self.min_hold_updates:
+            if self.settle_time_s > 0.0:
+                self.arrival_settle_started_monotonic = now_monotonic
+                detail = self._detail(target, yaw_rad, current, distance, z_error, velocity)
+                return ActionResult(
+                    effects=ActionResult.typed([self._effect(target, yaw_rad, context_data)]),
+                    reason="waypoint_settling",
+                    detail=detail,
+                )
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
             effects=ActionResult.typed([self._effect(target, yaw_rad, context_data)]),
@@ -243,8 +271,10 @@ class GotoWaypointAction(ActionModule):
         self.control_reject_reason = None
         self.control_reject_elapsed_s = 0.0
         self.max_duration_s = 180.0
+        self.settle_time_s = 0.0
         self.started_monotonic = None
         self.last_now_monotonic: float | None = None
+        self.arrival_settle_started_monotonic: float | None = None
         self.priority, self.key, self.reached_updates = 4, "goto_field_gps", 0
 
     def observe_dispatch_rejection(
@@ -345,6 +375,9 @@ class GotoWaypointAction(ActionModule):
             "control_reject_reason": self.control_reject_reason,
             "elapsed_s": self._elapsed_s(),
             "max_duration_s": self.max_duration_s,
+            "settle_time_s": self.settle_time_s,
+            "settle_elapsed_s": self._settle_elapsed_s(),
+            "settle_active": self.arrival_settle_started_monotonic is not None,
             **(velocity or {}),
         }
 
@@ -441,6 +474,12 @@ class GotoWaypointAction(ActionModule):
             return 0.0
         now = time.monotonic() if self.last_now_monotonic is None else self.last_now_monotonic
         return max(0.0, now - self.started_monotonic)
+
+    def _settle_elapsed_s(self) -> float:
+        if self.arrival_settle_started_monotonic is None:
+            return 0.0
+        now = time.monotonic() if self.last_now_monotonic is None else self.last_now_monotonic
+        return max(0.0, now - self.arrival_settle_started_monotonic)
 
     @staticmethod
     def _current_global_position(context: dict[str, Any]) -> dict[str, float] | None:

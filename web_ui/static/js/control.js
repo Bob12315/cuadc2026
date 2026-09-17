@@ -475,6 +475,9 @@ function renderStatus(next) {
   renderActionLabStatus(next.action_lab || null);
   renderActionMissionStatus(next.action_mission || null);
   renderDashboardSummaries(next);
+  if (window.UavVideoPanel && typeof window.UavVideoPanel.renderAlignmentTarget === "function") {
+    window.UavVideoPanel.renderAlignmentTarget(next);
+  }
 }
 // Video panel configure (WU-6 v2)
 if (window.UavVideoPanel && window.UavVideoPanel.configure) {

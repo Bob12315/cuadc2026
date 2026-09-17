@@ -37,13 +37,15 @@ def _yaw_lock(result) -> ConditionYaw:
     return locks[0]
 
 
-def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> None:
+def test_acquires_the_target_nearest_the_image_centre_and_descends() -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.0,
         "descend_speed_mps": 0.2,
         "kp_forward": 1.0,
         "kp_right": 1.0,
+        "final_kp_forward": 0.5,
+        "final_kp_right": 0.5,
         "max_vx_mps": 0.5,
         "max_vy_mps": 0.5,
         "field_yaw_deg": 90.0,
@@ -56,6 +58,8 @@ def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> No
 
     assert result.reason == "align_descending"
     assert result.detail["target_track_id"] == 12
+    assert result.detail["locked_target_track_id"] == 12
+    assert result.detail["target_lock_state"] == "acquired"
     command = _command(result)
     assert command.params["vx_cmd"] == 0.2
     assert command.params["vy_cmd"] == 0.1
@@ -72,6 +76,57 @@ def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> No
     assert command.params["yaw_rate_rad_s"] == 0.0
 
 
+def test_keeps_the_locked_target_until_it_disappears_then_relocks_nearest_position() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.0,
+        "kp_forward": 1.0,
+        "kp_right": 1.0,
+        "max_vx_mps": 1.0,
+        "max_vy_mps": 1.0,
+    })
+
+    acquired = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.05, 0.05, 11), _detection(0.2, 0.2, 12)],
+    ))
+    still_locked = action.update(_context(
+        frame_id=2,
+        detections=[_detection(0.6, -0.4, 11), _detection(0.01, 0.01, 12)],
+    ))
+    relocked = action.update(_context(
+        frame_id=3,
+        detections=[_detection(0.2, 0.2, 12), _detection(0.03, -0.02, 13)],
+    ))
+
+    assert acquired.detail["locked_target_track_id"] == 11
+    assert still_locked.detail["target_track_id"] == 11
+    assert still_locked.detail["target_lock_state"] == "locked"
+    assert _command(still_locked).params["vx_cmd"] == pytest.approx(0.4)
+    assert _command(still_locked).params["vy_cmd"] == pytest.approx(0.6)
+    assert relocked.detail["target_track_id"] == 13
+    assert relocked.detail["locked_target_track_id"] == 13
+    assert relocked.detail["target_lock_state"] == "relocked_nearest_position"
+
+
+def test_reacquires_the_same_image_target_when_its_track_id_changes() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.0})
+
+    action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.10, 0.10, 11), _detection(0.30, 0.30, 12)],
+    ))
+    reacquired = action.update(_context(
+        frame_id=2,
+        detections=[_detection(0.12, 0.09, 101), _detection(0.01, 0.01, 102)],
+    ))
+
+    assert reacquired.detail["target_track_id"] == 101
+    assert reacquired.detail["locked_target_track_id"] == 101
+    assert reacquired.detail["target_lock_state"] == "relocked_nearest_position"
+
+
 def test_descent_does_not_wait_for_alignment() -> None:
     action = AlignDescendAction()
     action.start({"target_altitude_m": 1.0, "descend_speed_mps": 0.2})
@@ -84,7 +139,6 @@ def test_descent_does_not_wait_for_alignment() -> None:
 
     assert result.reason == "align_descending"
     assert _command(result).params["vz_cmd"] == 0.2
-
 
 
 def test_release_offset_applies_only_after_reaching_release_altitude() -> None:
@@ -114,6 +168,55 @@ def test_release_offset_applies_only_after_reaching_release_altitude() -> None:
     assert final_height.detail["alignment_error_ey"] == pytest.approx(-0.1)
     assert _command(final_height).params["vx_cmd"] == pytest.approx(0.1)
     assert _command(final_height).params["vz_cmd"] == 0.0
+
+
+def test_final_altitude_stays_latched_through_a_small_height_rebound() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.2, "descend_speed_mps": 0.2})
+
+    reached = action.update(_context(
+        frame_id=1, detections=[_detection(0.2, 0.2)], altitude_m=1.2,
+    ))
+    rebounded = action.update(_context(
+        frame_id=2, detections=[_detection(0.2, 0.2)], altitude_m=1.3,
+    ))
+
+    assert reached.detail["final_altitude_latched"] is True
+    assert rebounded.reason == "confirming_alignment"
+    assert rebounded.detail["speed_control_phase"] == "final_altitude"
+    assert rebounded.detail["release_offset_active"] is True
+    assert _command(rebounded).params["vz_cmd"] == 0.0
+
+
+def test_final_altitude_uses_the_finer_velocity_limits() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.2,
+        "kp_forward": 1.0,
+        "kp_right": 1.0,
+        "final_kp_forward": 0.5,
+        "final_kp_right": 0.5,
+        "max_vx_mps": 0.15,
+        "max_vy_mps": 0.15,
+        "final_max_vx_mps": 0.08,
+        "final_max_vy_mps": 0.08,
+    })
+
+    descending = action.update(_context(
+        frame_id=1, detections=[_detection(0.1, -0.1)], altitude_m=1.3,
+    ))
+    final_height = action.update(_context(
+        frame_id=2, detections=[_detection(0.1, -0.1)], altitude_m=1.2,
+    ))
+
+    assert _command(descending).params["vx_cmd"] == pytest.approx(0.1)
+    assert _command(descending).params["vy_cmd"] == pytest.approx(0.1)
+    assert descending.detail["speed_control_phase"] == "descending"
+    assert _command(final_height).params["vx_cmd"] == pytest.approx(0.05)
+    assert _command(final_height).params["vy_cmd"] == pytest.approx(0.05)
+    assert final_height.detail["speed_control_phase"] == "final_altitude"
+    assert final_height.detail["active_max_vx_mps"] == pytest.approx(0.08)
+    assert final_height.detail["active_kp_forward"] == pytest.approx(0.5)
 
 
 def test_bounded_integral_increases_persistent_close_range_correction(monkeypatch) -> None:

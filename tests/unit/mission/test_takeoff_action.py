@@ -86,6 +86,27 @@ def test_takeoff_wait_altitude_until_target_reached() -> None:
     assert reached.reason == "takeoff_altitude_reached"
 
 
+def test_takeoff_settles_for_configured_time_before_completion(monkeypatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("missions.common.actions.takeoff.time.monotonic", lambda: clock[0])
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0, "yaw_mode": "hold", "settle_time_s": 2.0})
+    _advance_to_wait(action)
+
+    settling = action.update({"relative_altitude": 2.8})
+    assert settling.done is False
+    assert settling.reason == "takeoff_settling"
+    assert settling.actions == []
+
+    clock[0] = 1.99
+    assert action.update({"relative_altitude": 2.8}).reason == "takeoff_settling"
+
+    clock[0] = 2.0
+    complete = action.update({"relative_altitude": 2.8})
+    assert complete.done is True
+    assert complete.reason == "takeoff_altitude_reached"
+
+
 def test_takeoff_reads_altitude_from_local_position_z() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.0, "yaw_mode": "hold"})
