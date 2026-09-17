@@ -54,9 +54,9 @@ virtual_nadir:
   # 唯一的图像路径开关：
   # false = raw frame -> YOLO -> Web UI
   # true  = IMU stabilized frame -> YOLO -> Web UI
-  # 当前设备未提供姿态数据；启用时会按安全策略停止所有推理。直接使用原始相机帧，
-  # 让 12 类模型持续识别；姿态链路恢复并完成标定后再改为 true。
-  enabled: false
+  # 启用后只接受已同步且频率合格的姿态；姿态失配时暂停感知，避免将错误
+  # 的增稳画面用于定位或控制。
+  enabled: true
   yaw_reference_mode: "lock_on_start"
   # 只影响本机 OpenCV 调试窗口，不改变 Web UI 的 YOLO 标注画面。
   debug_compare: false
