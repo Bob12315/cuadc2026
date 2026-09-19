@@ -184,6 +184,7 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
     assert releases[1]["servo_outputs"] == [
         {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
     ]
+    assert [release["release_wait_s"] for release in releases] == [2, 2]
 
 
 def test_full_flow_plans_zero_one_or_two_target_release() -> None:
@@ -218,11 +219,13 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     for label in ("drop_1_align", "drop_2_align"):
         params = by_label[label]["params"]
         assert (params["kp_forward"], params["kp_right"]) == (0.35, 0.4)
-        assert (params["final_kp_forward"], params["final_kp_right"]) == (0.25, 0.3)
+        assert (params["final_kp_forward"], params["final_kp_right"]) == (0.25, 0.25)
         assert (params["ki_forward"], params["ki_right"]) == (0.0, 0.0)
         assert params["integral_limit"] == 0.0
         assert (params["max_vx_mps"], params["max_vy_mps"]) == (0.3, 0.3)
         assert (params["final_max_vx_mps"], params["final_max_vy_mps"]) == (0.15, 0.15)
+        assert params["release_max_speed_mps"] == 0.1
+        assert params["final_settle_time_s"] == 0.5
     assert by_label["drop_1_align"]["params"]["release_target_ey"] == 0.3
     assert by_label["drop_2_align"]["params"]["release_target_ey"] == -0.2
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"

@@ -13,10 +13,16 @@ def _context(
     frame_id: int,
     detections: list[dict],
     altitude_m: float = 2.0,
+    velocity_mps: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> dict:
     return {
         "field_heading_yaw_rad": 0.0,
-        "drone": {"relative_altitude": altitude_m},
+        "drone": {
+            "relative_altitude": altitude_m,
+            "vx": velocity_mps[0],
+            "vy": velocity_mps[1],
+            "vz": velocity_mps[2],
+        },
         "scene": {"frame_id": frame_id, "detections": detections},
     }
 
@@ -188,6 +194,40 @@ def test_final_altitude_stays_latched_through_a_small_height_rebound() -> None:
     assert _command(rebounded).params["vz_cmd"] == 0.0
 
 
+def test_final_altitude_holds_zero_velocity_for_the_configured_settle_time(monkeypatch) -> None:
+    action = AlignDescendAction()
+    clock = iter((100.0, 100.1, 100.2, 100.3, 100.4, 100.6, 100.7, 100.8, 100.9, 101.0))
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: next(clock))
+    action.start({
+        "target_altitude_m": 1.2,
+        "final_settle_time_s": 0.5,
+        "final_kp_forward": 1.0,
+        "final_kp_right": 1.0,
+    })
+
+    just_reached = action.update(_context(
+        frame_id=1, detections=[_detection(0.2, 0.2)], altitude_m=1.2,
+    ))
+    still_settling = action.update(_context(
+        frame_id=2, detections=[_detection(0.2, 0.2)], altitude_m=1.2,
+    ))
+    resumed = action.update(_context(
+        frame_id=3, detections=[_detection(0.2, 0.2)], altitude_m=1.2,
+    ))
+
+    for result in (just_reached, still_settling):
+        assert result.reason == "final_altitude_settling"
+        assert result.detail["final_settling"] is True
+        assert _command(result).params["vx_cmd"] == 0.0
+        assert _command(result).params["vy_cmd"] == 0.0
+        assert _command(result).params["vz_cmd"] == 0.0
+    assert resumed.reason == "confirming_alignment"
+    assert resumed.detail["final_settling"] is False
+    assert _command(resumed).params["vx_cmd"] == pytest.approx(-0.2)
+    assert _command(resumed).params["vy_cmd"] == pytest.approx(0.2)
+    assert _command(resumed).params["vz_cmd"] == 0.0
+
+
 def test_final_altitude_uses_the_finer_velocity_limits() -> None:
     action = AlignDescendAction()
     action.start({
@@ -269,6 +309,38 @@ def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
     assert command.params["vx_cmd"] == 0.0
     assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
+
+
+def test_release_waits_for_measured_3d_speed_below_the_limit() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.0,
+        "release_max_speed_mps": 0.1,
+    })
+
+    results = [
+        action.update(_context(
+            frame_id=index,
+            detections=[_detection(0.0, 0.0)],
+            altitude_m=1.0,
+            velocity_mps=(0.1, 0.0, 0.0),
+        ))
+        for index in range(1, 6)
+    ]
+    released = action.update(_context(
+        frame_id=6,
+        detections=[_detection(0.0, 0.0)],
+        altitude_m=1.0,
+        velocity_mps=(0.099, 0.0, 0.0),
+    ))
+
+    assert not results[-1].done
+    assert results[-1].reason == "waiting_for_release_speed"
+    assert results[-1].detail["within_release_speed_limit"] is False
+    assert results[-1].detail["measured_speed_mps"] == pytest.approx(0.1)
+    assert released.done and released.reason == "alignment_confirmed"
+    assert released.detail["within_release_speed_limit"] is True
+    assert released.detail["measured_speed_mps"] == pytest.approx(0.099)
 
 
 def test_duplicate_frame_is_not_counted_twice() -> None:

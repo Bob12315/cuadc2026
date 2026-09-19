@@ -224,10 +224,12 @@
         "release_deadband_ey": 0.05,
         "release_target_ex": 0.0,
         "release_target_ey": 0.3,
+        "release_max_speed_mps": 0.1,
+        "final_settle_time_s": 0.5,
         "kp_forward": 0.35,
         "kp_right": 0.4,
         "final_kp_forward": 0.25,
-        "final_kp_right": 0.3,
+        "final_kp_right": 0.25,
         "ki_forward": 0.0,
         "ki_right": 0.0,
         "integral_limit": 0.0,
@@ -256,7 +258,7 @@
         "target_id": "$drop_targets.target_slots.0.target_id",
         "servo_outputs": "$drop_targets.first_release_servo_outputs",
         "priority": 3,
-        "release_wait_s": 1,
+        "release_wait_s": 2,
         "release_wait_updates": 5,
         "key": "drop_1_release"
       }
@@ -320,10 +322,12 @@
         "release_deadband_ey": 0.05,
         "release_target_ex": 0.0,
         "release_target_ey": -0.2,
+        "release_max_speed_mps": 0.1,
+        "final_settle_time_s": 0.5,
         "kp_forward": 0.35,
         "kp_right": 0.4,
         "final_kp_forward": 0.25,
-        "final_kp_right": 0.3,
+        "final_kp_right": 0.25,
         "ki_forward": 0.0,
         "ki_right": 0.0,
         "integral_limit": 0.0,
@@ -358,7 +362,7 @@
           }
         ],
         "priority": 3,
-        "release_wait_s": 1,
+        "release_wait_s": 2,
         "release_wait_updates": 5,
         "key": "drop_2_release"
       }
@@ -610,6 +614,7 @@
         "descend_speed_mps": 0.2,
         "release_deadband_ex": 0.3,
         "release_deadband_ey": 0.3,
+        "final_settle_time_s": 0.5,
         "kp_forward": 0.35,
         "kp_right": 0.4,
         "final_kp_forward": 0.25,
