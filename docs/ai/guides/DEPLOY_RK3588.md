@@ -383,6 +383,10 @@ systemctl --user status uav-yolo.service
 | `allowed_networks` | 可接受的一组私有 IP 主机/IP Origin | 仅受信任的 CIDR，例如 `10.101.31.0/24`。 |
 | `auto_allow_current_private_network` | 当前默认路由的私有网段 | DHCP 会变更时可设为 `true`；它不是公网访问开关。 |
 
+若需要从 Tailscale 或任意字面量 IPv4/IPv6 地址访问，可显式配置
+`allowed_networks: ["0.0.0.0/0", "::/0"]`。这仍保留登录认证、CSRF 与 SEND 门，但会让
+任意网络地址的浏览器进入登录界面；DNS 主机名仍须另行加入 `allowed_hosts`。
+
 例如，RK3588 位于受信任的 `10.101.31.0/24` 操作网、浏览器访问
 `http://10.101.31.109:8080` 时，最小配置可为：
 

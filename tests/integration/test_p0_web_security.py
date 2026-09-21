@@ -124,6 +124,21 @@ def test_trusted_network_allows_host_and_same_port_origin(tmp_path) -> None:
     assert asyncio.run(run()).status_code == 200
 
 
+def test_all_ip_networks_allow_tailscale_ipv4_and_ipv6_hosts(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.web_port = 8080
+    config.allowed_networks = ("0.0.0.0/0", "::/0")
+    app = create_app(_services(_Runner()), config)
+
+    async def request(base_url: str) -> int:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=base_url) as client:
+            return (await client.get("/api/status", headers={"origin": base_url})).status_code
+
+    assert asyncio.run(request("http://100.107.97.24:8080")) == 200
+    assert asyncio.run(request("http://[fd7a:115c:a1e0::3036:6119]:8080")) == 200
+
+
 def test_current_private_interface_network_can_be_auto_allowed(tmp_path, monkeypatch) -> None:
     import ipaddress
     import web_ui.security as security_module

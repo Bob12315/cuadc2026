@@ -61,12 +61,11 @@ ui:
   session_ttl_sec: 28800
   allowed_hosts: ["127.0.0.1", "localhost", "[::1]", "10.101.31.108"]
   allowed_origins: ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://10.101.31.108:8080"]
-  # The whole operator LAN can reach the Web UI; authentication and CSRF are
-  # still required.  Add only trusted, private operator networks here.
-  allowed_networks: ["10.101.31.0/24"]
-  # At startup, derive the current default-route private IPv4 subnet from its
-  # address and netmask.  This handles DHCP IP/subnet changes on the RK3588.
-  auto_allow_current_private_network: true
+  # Accept any literal IPv4 or IPv6 Host, including Tailscale (100.64.0.0/10
+  # and its IPv6 ULA). Authentication, CSRF, and the System SEND gate remain
+  # mandatory; DNS host names still require an explicit allowed_hosts entry.
+  allowed_networks: ["0.0.0.0/0", "::/0"]
+  auto_allow_current_private_network: false
 
   # 操作审计日志。运行产物统一写入 runtime/，不提交 Git。
   audit_log_path: "runtime/logs/web_ui/audit.jsonl"
