@@ -43,6 +43,7 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
 
     align = dict(first_step["align_descend"])
     align["enabled"] = True
+    align["target_acquisition_timeout_s"] = None
     align["release_deadband_ex"] = 0.02
     align["release_deadband_ey"] = 0.02
     align["release_target_ey"] = 0.0

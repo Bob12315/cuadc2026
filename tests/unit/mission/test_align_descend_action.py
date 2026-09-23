@@ -377,6 +377,38 @@ def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     assert command.params["yaw_rate_rad_s"] == 0.0
 
 
+def test_initial_target_acquisition_timeout_completes_with_an_explicit_stop() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 0.3, "target_acquisition_timeout_s": 2.0})
+    action.started_at -= 2.01
+
+    result = action.update(_context(frame_id=1, detections=[], altitude_m=2.5))
+
+    assert result.done and not result.failed
+    assert result.reason == "target_acquisition_timeout_accepted"
+    assert result.detail["target_acquired"] is False
+    assert result.detail["target_acquisition_remaining_s"] == 0.0
+    command = _command(result)
+    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
+
+
+def test_initial_target_acquisition_timeout_is_disabled_after_first_target() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 0.3, "target_acquisition_timeout_s": 2.0})
+    action.started_at -= 2.01
+
+    result = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.1, -0.1)],
+        altitude_m=2.5,
+    ))
+
+    assert not result.done and not result.failed
+    assert result.reason == "align_descending"
+    assert result.detail["target_acquired"] is True
+    assert result.detail["target_acquisition_remaining_s"] is None
+
+
 def test_yaw_is_latched_for_target_loss_even_if_context_heading_changes() -> None:
     action = AlignDescendAction()
     action.start({"field_yaw_deg": 15.0, "target_altitude_m": 1.0})

@@ -610,6 +610,7 @@
       "params": {
         "enabled": true,
         "complete_on_timeout": false,
+        "target_acquisition_timeout_s": 2.0,
         "target_altitude_m": 0.3,
         "descend_speed_mps": 0.2,
         "release_deadband_ex": 0.3,

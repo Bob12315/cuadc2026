@@ -24,6 +24,10 @@ class AlignDescendAction(ActionModule):
         self.complete_on_timeout = self._boolean(
             data.get("complete_on_timeout", False), "complete_on_timeout"
         )
+        self.target_acquisition_timeout_s = self._optional_positive(
+            data.get("target_acquisition_timeout_s"),
+            "target_acquisition_timeout_s",
+        )
         self.target_altitude_m = self._positive(data.get("target_altitude_m", 1.2), "target_altitude_m")
         self.descend_speed_mps = self._non_negative(data.get("descend_speed_mps", 0.2), "descend_speed_mps")
         self.release_deadband_ex = self._positive(data.get("release_deadband_ex", 0.1), "release_deadband_ex")
@@ -77,6 +81,8 @@ class AlignDescendAction(ActionModule):
         self.locked_target_ex = None
         self.locked_target_ey = None
         self.target_lock_state = "waiting_for_target"
+        self.target_acquired = False
+        self.target_acquisition_remaining_s = self.target_acquisition_timeout_s
         self._reset_integral()
         self.started = True
         self.stopped = False
@@ -97,8 +103,24 @@ class AlignDescendAction(ActionModule):
                 yaw_rad=yaw,
             )
 
-        scene = data.get("scene")
         altitude = self._altitude(data)
+        scene = data.get("scene")
+        target = self._locked_scene_target(scene)
+        if target is not None:
+            # This is deliberately latched: the optional acquisition timeout
+            # only decides whether to start visual descent at all.  A later
+            # one-frame YOLO dropout must retain the normal target-loss hold
+            # behavior instead of unexpectedly switching to LAND.
+            self.target_acquired = True
+            self.target_acquisition_remaining_s = None
+        elif self._target_acquisition_timed_out():
+            return self._terminal(
+                True,
+                "target_acquisition_timeout_accepted",
+                yaw_rad=yaw,
+                altitude_m=altitude,
+            )
+
         # The vehicle's height controller may briefly rise after it starts
         # holding the final height.  Once reached, keep the final-height mode
         # latched for this action instead of reissuing a descent command.
@@ -115,7 +137,6 @@ class AlignDescendAction(ActionModule):
             return self._holding(
                 "final_altitude_settling", yaw_rad=yaw, altitude_m=altitude
             )
-        target = self._locked_scene_target(scene)
         speed_mps = self._speed_mps(data)
         if target is None or altitude is None or altitude <= 0.0:
             self._reset_integral()
@@ -192,6 +213,7 @@ class AlignDescendAction(ActionModule):
         self.stopped = False
         self.enabled = True
         self.complete_on_timeout = False
+        self.target_acquisition_timeout_s: float | None = None
         self.target_altitude_m = 1.2
         self.descend_speed_mps = 0.2
         self.release_deadband_ex = 0.1
@@ -230,6 +252,8 @@ class AlignDescendAction(ActionModule):
         self.locked_target_ex: float | None = None
         self.locked_target_ey: float | None = None
         self.target_lock_state = "not_started"
+        self.target_acquired = False
+        self.target_acquisition_remaining_s: float | None = None
         self.integral_forward = 0.0
         self.integral_right = 0.0
         self.last_integral_frame_id: int | None = None
@@ -244,6 +268,17 @@ class AlignDescendAction(ActionModule):
             0.0, self.final_settle_until - time.monotonic()
         )
         return self.final_settle_remaining_s > 0.0
+
+    def _target_acquisition_timed_out(self) -> bool:
+        """Return true only when the optional initial visual-acquisition window expires."""
+        if self.target_acquired or self.target_acquisition_timeout_s is None:
+            self.target_acquisition_remaining_s = None
+            return False
+        self.target_acquisition_remaining_s = max(
+            0.0,
+            self.target_acquisition_timeout_s - (time.monotonic() - self.started_at),
+        )
+        return self.target_acquisition_remaining_s <= 0.0
 
     def _locked_scene_target(self, scene: object) -> dict[str, float | int] | None:
         candidates = self._scene_targets(scene)
@@ -506,6 +541,9 @@ class AlignDescendAction(ActionModule):
             "alignment_error_ey": alignment_error_ey,
             "enabled": self.enabled,
             "complete_on_timeout": self.complete_on_timeout,
+            "target_acquisition_timeout_s": self.target_acquisition_timeout_s,
+            "target_acquired": self.target_acquired,
+            "target_acquisition_remaining_s": self.target_acquisition_remaining_s,
             "target_lock_enabled": True,
             "target_lock_mode": "track_id_or_nearest_previous_position",
             "locked_target_track_id": self.locked_target_track_id,
@@ -586,6 +624,12 @@ class AlignDescendAction(ActionModule):
         if result <= 0.0:
             raise ValueError(f"{name} must be > 0")
         return result
+
+    @classmethod
+    def _optional_positive(cls, value: Any, name: str) -> float | None:
+        if value is None:
+            return None
+        return cls._positive(value, name)
 
     @classmethod
     def _non_negative(cls, value: Any, name: str) -> float:

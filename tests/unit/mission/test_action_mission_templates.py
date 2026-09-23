@@ -232,3 +232,4 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_1_align"]["params"]["complete_on_timeout"] is True
     assert by_label["drop_2_align"]["params"]["complete_on_timeout"] is True
     assert by_label["final_land_align"]["params"]["complete_on_timeout"] is False
+    assert by_label["final_land_align"]["params"]["target_acquisition_timeout_s"] == 2.0
