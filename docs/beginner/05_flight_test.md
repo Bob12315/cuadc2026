@@ -108,7 +108,7 @@ schema v3 生成 FIELD → GPS/GLOBAL 任务几何，不建立 LOCAL_NED 场地�
 6. 条件满足后等待系统自动 finalize、apply 和 freeze；
 7. 确认状态为 confirmed、synced、frozen。
 
-当前模板通常要求至少 20 个合格样本、12 秒采样窗口和不超过 1 m 的水平离散度，实际
+当前模板要求至少 6 个合格样本、6 秒采样窗口和不超过 1 m 的水平离散度，实际
 阈值以 `config/field_profiles/competition_runtime.json` 为准。
 
 以下情况必须 Reset 并排除原因，不能绕过 preflight：

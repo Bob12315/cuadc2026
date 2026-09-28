@@ -78,7 +78,7 @@
   },
   "runtime_origin_sampling": {
     "min_samples": 6,
-    "sample_window_s": 12.0,
+    "sample_window_s": 6.0,
     "max_horizontal_spread_m": 1.0,
     "estimator": "median"
   },
