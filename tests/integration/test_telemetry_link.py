@@ -9,15 +9,33 @@ from types import SimpleNamespace
 import pytest
 from pymavlink import mavutil
 
-from telemetry_link.command_dispatcher import dispatch_text_command
-from telemetry_link.command_queue import CommandQueue
-from telemetry_link.command_sender import CommandSender
-from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, _build_config, build_arg_parser, load_config, load_config_file
+from telemetry_link.mavlink_command_encoder import MavlinkCommandEncoder
+from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, _build_config, load_config_file
 from telemetry_link.link_manager import LinkManager, SourceRuntime
 from telemetry_link.mavlink_client import MavlinkClient
 from telemetry_link.models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
 from telemetry_link.state_cache import StateCache
 from telemetry_link.telemetry_receiver import TelemetryReceiver
+
+
+from contracts.platform.vehicle_commands import BodyVelocity
+from telemetry_link.command_broker import CommandBroker
+from telemetry_link.mavlink_command_adapter import MavlinkCommandAdapter
+
+
+def _attach_broker(runtime):
+    context = runtime.command_context
+    context.run_id = context.execution_lease_id = "test-run"
+    context.send_enabled = True
+    sent = []
+    broker = CommandBroker(writer=sent.append, source=lambda: runtime.name,
+        link_session=lambda: "session", authorization_generation=lambda: context.authorization_generation,
+        send_generation=lambda: context.send_generation, send_enabled=lambda: context.send_enabled,
+        monotonic_ns=time.monotonic_ns)
+    runtime.command_broker = broker
+    runtime.command_adapter = MavlinkCommandAdapter(broker, SimpleNamespace(notify=lambda: None),
+        source=runtime.name, session_id=lambda: "session", context=context)
+    return broker, sent
 
 
 def _endpoint(name: str) -> EndpointConfig:
@@ -43,9 +61,8 @@ def _config(**overrides) -> TelemetryConfig:
         active_source="sitl",
         sitl=_endpoint("sitl"),
         real=_endpoint("real"),
-        control_send_rate_hz=10.0,
-        action_cmd_retries=0,
-        action_retry_interval_sec=0.01,
+
+
         heartbeat_timeout_sec=0.05,
         rx_timeout_sec=0.05,
         reconnect_interval_sec=0.01,
@@ -58,34 +75,25 @@ def _config(**overrides) -> TelemetryConfig:
         gimbal_yaw_max_deg=180.0,
         gimbal_pitch_min_deg=-180.0,
         gimbal_pitch_max_deg=180.0,
-        state_udp_enabled=False,
-        state_udp_ip="127.0.0.1",
-        state_udp_port=5010,
-        ui_enabled=False,
         log_level="INFO",
     )
     data.update(overrides)
     return TelemetryConfig(**data)
 
 
-def test_switch_active_source_clears_all_continuous_queues() -> None:
+def test_switch_active_source_cancels_motion_on_all_sources() -> None:
     manager = LinkManager(_config())
-    manager.runtimes["sitl"].command_queue.put_control(
-        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
-    )
-    manager.runtimes["sitl"].command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
-    manager.runtimes["real"].command_queue.put_control(
-        ControlCommand(command_type=ControlType.VELOCITY, vx=2.0)
-    )
-    manager.runtimes["real"].command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.4))
-
+    pending = []
+    for runtime in manager.runtimes.values():
+        broker, sent = _attach_broker(runtime)
+        receipt = runtime.command_adapter.submit_control(ControlCommand(ControlType.VELOCITY, vx=1, frame=8))
+        pending.append((broker, receipt, sent))
     assert manager.switch_active_source("real") is True
-
     assert manager.get_active_source() == "real"
-    assert manager.runtimes["sitl"].command_queue.peek_control() is None
-    assert manager.runtimes["sitl"].command_queue.peek_gimbal_rate() is None
-    assert manager.runtimes["real"].command_queue.peek_control() is None
-    assert manager.runtimes["real"].command_queue.peek_gimbal_rate() is None
+    for broker, receipt, sent in pending:
+        assert broker.status(receipt.command_id).queue_state.value == "CANCELLED"
+        assert broker.drain_one() is None
+        assert not any(isinstance(value.payload, BodyVelocity) for value in sent)
 
 
 def test_switch_active_source_updates_shared_attitude_publisher_session() -> None:
@@ -104,30 +112,16 @@ def test_switch_active_source_updates_shared_attitude_publisher_session() -> Non
 
 
 def test_virtual_nadir_attitude_interval_is_forced_to_at_least_30_hz() -> None:
-    cfg = _config(
-        data_source="sitl",
-        active_source="sitl",
-        attitude_udp_enabled=True,
-        attitude_udp_rate_hz=30.0,
-        message_interval_hz={"ATTITUDE": 10.0},
-    )
-    runtime = SourceRuntime(
-        name="sitl",
-        endpoint=_endpoint("sitl"),
-        cfg=cfg,
-        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
-        command_queue=CommandQueue(),
-        client=SimpleNamespace(),
-        stop_event=threading.Event(),
-        worker_stop_event=threading.Event(),
-    )
-
-    runtime._request_default_message_intervals(direct=False)
-    action = runtime.command_queue.get_next_action()
-
-    assert action is not None
-    assert action.action_type == ActionType.REQUEST_MESSAGE_INTERVAL
-    assert action.params == {"message_name": "ATTITUDE", "rate_hz": 30.0}
+    cfg = _config(data_source="sitl", active_source="sitl", attitude_udp_enabled=True,
+                  attitude_udp_rate_hz=30, message_interval_hz={"ATTITUDE": 10})
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(.05, .05),
+                            SimpleNamespace(), threading.Event(), threading.Event())
+    sent = []
+    runtime.encoder = SimpleNamespace(_send_action=sent.append)
+    runtime._request_default_message_intervals()
+    assert len(sent) == 1
+    assert sent[0].action_type == ActionType.REQUEST_MESSAGE_INTERVAL
+    assert sent[0].params == {"message_name": "ATTITUDE", "rate_hz": 30}
 
 
 class _FailingClient:
@@ -157,7 +151,6 @@ def test_source_runtime_start_returns_while_connect_retries_in_background() -> N
         endpoint=_endpoint("sitl"),
         cfg=_config(data_source="sitl", active_source="sitl"),
         state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
-        command_queue=CommandQueue(),
         client=client,
         stop_event=threading.Event(),
         worker_stop_event=threading.Event(),
@@ -175,78 +168,39 @@ def test_source_runtime_start_returns_while_connect_retries_in_background() -> N
         runtime.stop()
 
 
-def test_source_runtime_stop_workers_clears_all_pending_commands() -> None:
-    runtime = SourceRuntime(
-        name="sitl",
-        endpoint=_endpoint("sitl"),
-        cfg=_config(data_source="sitl", active_source="sitl"),
-        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
-        command_queue=CommandQueue(),
-        client=_FailingClient(),
-        stop_event=threading.Event(),
-        worker_stop_event=threading.Event(),
-    )
-    runtime.command_queue.put_control(
-        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
-    )
-    runtime.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
-    runtime.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
-    runtime.command_queue.put_action(
-        ActionCommand(action_type=ActionType.LOCAL_POSITION)
-    )
-    runtime.command_queue.put_action(
-        ActionCommand(action_type=ActionType.GLOBAL_GOTO)
-    )
-
+def test_source_runtime_stop_workers_cancels_pending_motion_and_actions() -> None:
+    cfg = _config(data_source="sitl", active_source="sitl")
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(.05, .05),
+                            _FailingClient(), threading.Event(), threading.Event())
+    broker, sent = _attach_broker(runtime)
+    control = runtime.command_adapter.submit_control(ControlCommand(ControlType.VELOCITY, vx=1, frame=8))
+    action = runtime.command_adapter.submit_action(ActionCommand(ActionType.ARM))
     runtime._stop_workers(close_client=False)
+    assert broker.status(control.command_id).queue_state.value == "CANCELLED"
+    assert broker.status(action.command_id).queue_state.value == "CANCELLED"
+    assert broker.drain_one() is None
+    assert runtime.command_adapter is None and runtime.command_broker is None
+    assert sent == []  # no previously transmitted motion required a stop
 
-    assert runtime.command_queue.peek_control() is None
-    assert runtime.command_queue.peek_gimbal_rate() is None
-    assert runtime.command_queue.get_next_action() is None
 
-
-def test_stale_link_monitor_clears_continuous_and_pending_commands() -> None:
-    """Heartbeat/RX expiry is characterized as a reconnect plus full queue clear."""
-
-    class _StopAfterFirstWait:
-        def is_set(self) -> bool:
-            return False
-
-        def wait(self, _timeout: float) -> bool:
-            return True
-
-        def set(self) -> None:
-            pass
-
-    stale_at = time.time() - 1.0
-    runtime = SourceRuntime(
-        name="sitl",
-        endpoint=_endpoint("sitl"),
-        cfg=_config(data_source="sitl", active_source="sitl"),
-        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
-        command_queue=CommandQueue(),
-        client=_FailingClient(),
-        stop_event=_StopAfterFirstWait(),
-        worker_stop_event=threading.Event(),
-    )
-    runtime.state_cache.mark_connected(
-        target_system=1,
-        target_component=1,
-        transport="tcp",
-        now=stale_at,
-    )
-    runtime.command_queue.put_control(
-        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
-    )
-    runtime.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
-    runtime.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
-
+def test_stale_link_monitor_cancels_pending_commands_and_closes_client() -> None:
+    class StopAfterFirstWait:
+        def is_set(self): return False
+        def wait(self, timeout): return True
+        def set(self): pass
+    cfg = _config(data_source="sitl", active_source="sitl")
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(.05, .05),
+                            _FailingClient(), StopAfterFirstWait(), threading.Event())
+    runtime.state_cache.mark_connected(target_system=1, target_component=1,
+                                      transport="tcp", now=time.time()-1)
+    broker, sent = _attach_broker(runtime)
+    action = runtime.command_adapter.submit_action(ActionCommand(ActionType.ARM))
+    control = runtime.command_adapter.submit_control(ControlCommand(ControlType.VELOCITY, vx=1, frame=8))
     runtime._monitor_loop(logging.getLogger("test"))
-
-    assert runtime.state_cache.get_link_status().reconnecting is True
-    assert runtime.command_queue.peek_control() is None
-    assert runtime.command_queue.peek_gimbal_rate() is None
-    assert runtime.command_queue.get_next_action() is None
+    assert runtime.client.closed
+    assert broker.status(action.command_id).queue_state.value == "CANCELLED"
+    assert broker.status(control.command_id).queue_state.value == "CANCELLED"
+    assert broker.drain_one() is None and sent == []
 
 
 def test_load_config_rejects_quoted_false_bool(tmp_path, monkeypatch) -> None:
@@ -259,9 +213,8 @@ sitl:
   connection_type: tcp
 real:
   connection_type: tcp
-control_send_rate_hz: 10
-action_cmd_retries: 0
-action_retry_interval_sec: 0.01
+
+
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
 reconnect_interval_sec: 0.01
@@ -269,69 +222,13 @@ receiver_idle_sleep_sec: 0.01
 sender_idle_sleep_sec: 0.01
 request_message_intervals: "false"
 message_interval_hz: {}
-state_udp_enabled: "false"
-ui_enabled: "false"
 log_level: INFO
 """.lstrip(),
         encoding="utf-8",
     )
-    monkeypatch.setattr("sys.argv", ["telemetry_link.main", "--config", str(path)])
 
     with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
-        load_config()
-
-
-def test_load_config_parses_cli_false_override(tmp_path, monkeypatch) -> None:
-    path = tmp_path / "telemetry.yaml"
-    path.write_text(
-        """
-data_source: sitl
-active_source: sitl
-sitl:
-  connection_type: tcp
-real:
-  connection_type: tcp
-control_send_rate_hz: 10
-action_cmd_retries: 0
-action_retry_interval_sec: 0.01
-heartbeat_timeout_sec: 0.05
-rx_timeout_sec: 0.05
-reconnect_interval_sec: 0.01
-receiver_idle_sleep_sec: 0.01
-sender_idle_sleep_sec: 0.01
-request_message_intervals: true
-message_interval_hz: {}
-state_udp_enabled: true
-ui_enabled: false
-log_level: INFO
-""".lstrip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "telemetry_link.main",
-            "--config",
-            str(path),
-            "--request-message-intervals",
-            "false",
-            "--state-udp-enabled",
-            "false",
-        ],
-    )
-
-    cfg = load_config()
-
-    assert cfg.request_message_intervals is False
-    assert cfg.state_udp_enabled is False
-
-
-def test_build_arg_parser_defaults_to_root_telemetry_config(monkeypatch) -> None:
-    monkeypatch.setattr("sys.argv", ["telemetry_link.main"])
-
-    args = build_arg_parser().parse_args()
-
-    assert args.config == str(DEFAULT_CONFIG_PATH)
+        load_config_file(path)
 
 
 def test_load_config_file_uses_tracked_real_root_profile() -> None:
@@ -366,9 +263,8 @@ real:
   eth_mode: udpout
   eth_host: 192.168.144.10
   eth_port: 14550
-control_send_rate_hz: 10
-action_cmd_retries: 0
-action_retry_interval_sec: 0.01
+
+
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
 reconnect_interval_sec: 0.01
@@ -376,15 +272,12 @@ receiver_idle_sleep_sec: 0.01
 sender_idle_sleep_sec: 0.01
 request_message_intervals: false
 message_interval_hz: {}
-state_udp_enabled: false
-ui_enabled: false
 log_level: INFO
 """.lstrip(),
         encoding="utf-8",
     )
-    monkeypatch.setattr("sys.argv", ["telemetry_link.main", "--config", str(path)])
 
-    cfg = load_config()
+    cfg = load_config_file(path)
 
     assert cfg.real.connection_type == "eth"
     assert cfg.real.eth_mode == "udpout"
@@ -444,9 +337,8 @@ sitl:
   connection_type: tcp
 real:
   connection_type: tcp
-control_send_rate_hz: 10
-action_cmd_retries: 0
-action_retry_interval_sec: 0.01
+
+
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
 reconnect_interval_sec: 0.01
@@ -454,16 +346,13 @@ receiver_idle_sleep_sec: 0.01
 sender_idle_sleep_sec: 0.01
 request_message_intervals: maybe
 message_interval_hz: {}
-state_udp_enabled: false
-ui_enabled: false
 log_level: INFO
 """.lstrip(),
         encoding="utf-8",
     )
-    monkeypatch.setattr("sys.argv", ["telemetry_link.main", "--config", str(path)])
 
     with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
-        load_config()
+        load_config_file(path)
 
 
 def test_local_position_ned_updates_raw_local_position_without_overwriting_relative_altitude() -> None:
@@ -488,44 +377,6 @@ def test_local_position_ned_updates_raw_local_position_without_overwriting_relat
     assert state.local_y == pytest.approx(-2.5)
     assert state.local_z == pytest.approx(-3.75)
     assert state.relative_altitude == pytest.approx(4.2)
-
-
-def test_dispatch_set_servo_queues_action_command() -> None:
-    manager = LinkManager(_config(data_source="sitl", active_source="sitl"))
-    manager.cfg.legacy_writer_enabled = True
-    manager.cfg.v2_writer_enabled = False
-
-    result = dispatch_text_command(manager, "set_servo 9 1900")
-
-    action = manager.runtimes["sitl"].command_queue.get_next_action()
-    assert result.ok is True
-    assert action is not None
-    assert action.action_type == ActionType.SET_SERVO
-    assert action.params == {"channel": 9, "pwm": 1900}
-
-
-def test_dispatch_set_relay_queues_action_command() -> None:
-    manager = LinkManager(_config(data_source="sitl", active_source="sitl"))
-    manager.cfg.legacy_writer_enabled = True
-    manager.cfg.v2_writer_enabled = False
-
-    result = dispatch_text_command(manager, "set_relay 0 on")
-
-    action = manager.runtimes["sitl"].command_queue.get_next_action()
-    assert result.ok is True
-    assert action is not None
-    assert action.action_type == ActionType.SET_RELAY
-    assert action.params == {"relay_id": 0, "state": True}
-
-
-def test_dispatch_release_payload_rejects_unconfigured_mapping() -> None:
-    manager = LinkManager(_config(data_source="sitl", active_source="sitl"))
-
-    result = dispatch_text_command(manager, "release_payload 1")
-
-    assert result.ok is False
-    assert "not configured" in result.message
-    assert manager.runtimes["sitl"].command_queue.get_next_action() is None
 
 
 class _FakeMav:
@@ -559,43 +410,18 @@ class _RawMessageClient:
         callback(self.master)
 
 
-def _sender_with_fake_client() -> tuple[CommandSender, _RawMessageClient]:
+def _encoder_with_fake_client() -> tuple[MavlinkCommandEncoder, _RawMessageClient]:
     client = _RawMessageClient()
-    sender = CommandSender(
+    sender = MavlinkCommandEncoder(
         client=client,
-        command_queue=CommandQueue(),
         state_cache=StateCache(heartbeat_timeout_sec=1.0, rx_timeout_sec=1.0),
         cfg=_config(data_source="sitl", active_source="sitl"),
-        stop_event=threading.Event(),
     )
     return sender, client
 
 
-def test_command_sender_disconnected_drops_continuous_and_pending_action(
-    monkeypatch,
-) -> None:
-    """A disconnected sender clears continuous state and drops queued actions."""
-    sender, _client = _sender_with_fake_client()
-    sender.command_queue.put_control(
-        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
-    )
-    sender.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
-    sender.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
-
-    monkeypatch.setattr(
-        "telemetry_link.command_sender.time.sleep",
-        lambda _seconds: sender.stop_event.set(),
-    )
-
-    sender.run()
-
-    assert sender.command_queue.peek_control() is None
-    assert sender.command_queue.peek_gimbal_rate() is None
-    assert sender.command_queue.get_next_action() is None
-
-
-def test_command_sender_set_servo_uses_mav_cmd_do_set_servo() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_set_servo_uses_mav_cmd_do_set_servo() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_action(
         ActionCommand(
@@ -609,8 +435,8 @@ def test_command_sender_set_servo_uses_mav_cmd_do_set_servo() -> None:
     assert call[4:11] == (9.0, 1900.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 
-def test_command_sender_set_relay_uses_mav_cmd_do_set_relay() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_set_relay_uses_mav_cmd_do_set_relay() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_action(
         ActionCommand(
@@ -624,8 +450,8 @@ def test_command_sender_set_relay_uses_mav_cmd_do_set_relay() -> None:
     assert call[4:11] == (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 
-def test_command_sender_velocity_ignores_yaw_axis() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_velocity_ignores_yaw_axis() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_velocity(
         client.master,
@@ -645,8 +471,8 @@ def test_command_sender_velocity_ignores_yaw_axis() -> None:
     assert call[8:11] == (1.0, 2.0, 3.0)
 
 
-def test_command_sender_velocity_with_yaw_holds_yaw_axis() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_velocity_with_yaw_holds_yaw_axis() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_velocity(
         client.master,
@@ -668,8 +494,8 @@ def test_command_sender_velocity_with_yaw_holds_yaw_axis() -> None:
     assert call[14] == pytest.approx(1.25)
 
 
-def test_command_sender_body_velocity_with_zero_yaw_rate_uses_mask_1479() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_body_velocity_with_zero_yaw_rate_uses_mask_1479() -> None:
+    sender, client = _encoder_with_fake_client()
     sender._send_velocity(
         client.master,
         ControlCommand(
@@ -710,8 +536,8 @@ def test_command_sender_body_velocity_with_zero_yaw_rate_uses_mask_1479() -> Non
     assert call[15] == pytest.approx(0.0)
 
 
-def test_command_sender_rejects_velocity_with_yaw_and_yaw_rate() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_rejects_velocity_with_yaw_and_yaw_rate() -> None:
+    sender, client = _encoder_with_fake_client()
     with pytest.raises(ValueError, match="both yaw and yaw_rate"):
         sender._send_velocity(
             client.master,
@@ -719,8 +545,8 @@ def test_command_sender_rejects_velocity_with_yaw_and_yaw_rate() -> None:
         )
 
 
-def test_command_sender_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_yaw_rate(
         client.master,
@@ -734,8 +560,8 @@ def test_command_sender_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
     assert call[-1] == pytest.approx(0.5)
 
 
-def test_command_sender_local_position_can_hold_yaw() -> None:
-    sender, client = _sender_with_fake_client()
+def test_command_encoder_local_position_can_hold_yaw() -> None:
+    sender, client = _encoder_with_fake_client()
 
     sender._send_local_position(
         client.master,
@@ -753,188 +579,6 @@ def test_command_sender_local_position_can_hold_yaw() -> None:
     assert call[14] == pytest.approx(0.75)
 
 
-def _local_position_with_speed_override() -> ActionCommand:
-    return ActionCommand(
-        action_type=ActionType.LOCAL_POSITION,
-        params={
-            "x": 1.0,
-            "y": 2.0,
-            "z": -3.0,
-            "frame": 1,
-            "_speed_overrides": [{"speed_type": 1, "speed_mps": 1.0}],
-        },
-    )
+# ── SITL 前安全修复：CommandQueue / MavlinkCommandEncoder 原子 stop-and-clear ────
 
 
-def test_position_transition_reapplies_speed_after_position_setpoint() -> None:
-    sender, client = _sender_with_fake_client()
-
-    sender._send_action(_local_position_with_speed_override())
-
-    assert [event[0] for event in client.master.mav.events] == [
-        "local_position",
-        "command_long",
-    ]
-    speed_call = client.master.mav.command_long_calls[-1]
-    assert speed_call[2] == mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED
-    assert speed_call[4:7] == (1.0, 1.0, -1.0)
-
-
-def test_repeated_position_setpoint_does_not_spam_speed_command() -> None:
-    sender, client = _sender_with_fake_client()
-    command = _local_position_with_speed_override()
-
-    sender._send_action(command)
-    sender._send_action(command)
-
-    assert len(client.master.mav.local_position_calls) == 2
-    assert len(client.master.mav.command_long_calls) == 1
-
-
-def test_velocity_to_position_transition_reapplies_speed_again() -> None:
-    sender, client = _sender_with_fake_client()
-    command = _local_position_with_speed_override()
-    sender._send_action(command)
-
-    sender._send_control(
-        ControlCommand(
-            command_type=ControlType.VELOCITY,
-            vx=0.1,
-            vy=0.0,
-            vz=0.0,
-            frame=8,
-        )
-    )
-    sender._send_action(command)
-
-    assert len(client.master.mav.command_long_calls) == 2
-    assert client.master.mav.events[-2][0] == "local_position"
-    assert client.master.mav.events[-1][0] == "command_long"
-
-
-def test_command_sender_release_payload_does_not_emit_mavlink_without_mapping() -> None:
-    sender, client = _sender_with_fake_client()
-
-    sender._send_action(
-        ActionCommand(
-            action_type=ActionType.RELEASE_PAYLOAD,
-            params={"payload_id": 1},
-        )
-    )
-
-    assert client.master.mav.command_long_calls == []
-
-
-# ── SITL 前安全修复：CommandQueue / CommandSender 原子 stop-and-clear ────
-
-
-def test_clear_control_if_same_only_clears_exact_object() -> None:
-    """clear_control_if_same uses identity (is) check — only clears the exact object."""
-    from telemetry_link.command_queue import CommandQueue
-
-    q = CommandQueue()
-    cmd_a = ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
-    cmd_b = ControlCommand(command_type=ControlType.STOP, vx=0.0, clear_after_send=True)
-
-    q.put_control(cmd_a)
-    # clear with cmd_b should NOT clear cmd_a (different object)
-    result = q.clear_control_if_same(cmd_b)
-    assert result is False
-    assert q.peek_control() is cmd_a
-
-    # clear with cmd_a should clear it
-    result = q.clear_control_if_same(cmd_a)
-    assert result is True
-    assert q.peek_control() is None
-
-
-def test_clear_control_if_same_does_not_clear_newer_command() -> None:
-    """If a newer command replaces the STOP, clear_control_if_same must not clear it."""
-    from telemetry_link.command_queue import CommandQueue
-
-    q = CommandQueue()
-    stop_cmd = ControlCommand(command_type=ControlType.STOP, vx=0.0, clear_after_send=True)
-    new_cmd = ControlCommand(command_type=ControlType.VELOCITY, vx=0.5)
-
-    q.put_control(stop_cmd)
-    assert q.peek_control() is stop_cmd
-
-    # New command replaces STOP before it was sent
-    q.put_control(new_cmd)
-    assert q.peek_control() is new_cmd
-
-    # Clearing the old STOP must NOT affect the new command
-    result = q.clear_control_if_same(stop_cmd)
-    assert result is False, "must not clear newer command"
-    assert q.peek_control() is new_cmd
-
-
-def test_command_sender_sends_stop_and_clears_queue() -> None:
-    """CommandSender sends STOP with clear_after_send then clears the queue entry."""
-    sender, client = _sender_with_fake_client()
-    stop_cmd = ControlCommand(
-        command_type=ControlType.STOP,
-        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
-        frame=8,
-        clear_after_send=True,
-    )
-    sender.command_queue.put_control(stop_cmd)
-    assert sender.command_queue.peek_control() is stop_cmd
-
-    sender._send_control(stop_cmd)
-
-    # After sending, the queue entry should be cleared
-    assert sender.command_queue.peek_control() is None
-    # Verify mavlink actually received a velocity setpoint
-    assert len(client.master.mav.local_position_calls) >= 1
-    call = client.master.mav.local_position_calls[-1]
-    # Vx, Vy, Vz = 0.0
-    assert call[8:11] == (0.0, 0.0, 0.0)
-
-
-def test_command_sender_does_not_clear_on_send_failure() -> None:
-    """If _send_control raises, the STOP must remain in queue for retry."""
-    sender, client = _sender_with_fake_client()
-    stop_cmd = ControlCommand(
-        command_type=ControlType.STOP,
-        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
-        frame=8,
-        clear_after_send=True,
-    )
-    sender.command_queue.put_control(stop_cmd)
-
-    # Simulate send failure by making send_raw_message raise
-    def failing_send(_callback):
-        raise RuntimeError("simulated send failure")
-
-    client.send_raw_message = failing_send
-
-    try:
-        sender._send_control(stop_cmd)
-    except RuntimeError:
-        pass
-
-    # Queue must still contain the STOP for retry
-    assert sender.command_queue.peek_control() is stop_cmd, (
-        "STOP must remain in queue after send failure for retry"
-    )
-
-
-def test_regular_stop_without_clear_after_send_does_not_clear_queue() -> None:
-    """Regular stop_body_velocity (without clear_after_send) must NOT clear the queue."""
-    sender, client = _sender_with_fake_client()
-    regular_stop = ControlCommand(
-        command_type=ControlType.STOP,
-        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
-        frame=8,
-        # clear_after_send defaults to False
-    )
-    sender.command_queue.put_control(regular_stop)
-    assert sender.command_queue.peek_control() is regular_stop
-
-    sender._send_control(regular_stop)
-
-    # Regular STOP without clear_after_send must remain in queue
-    assert sender.command_queue.peek_control() is regular_stop, (
-        "regular STOP must stay in queue for continuous rate sending"
-    )

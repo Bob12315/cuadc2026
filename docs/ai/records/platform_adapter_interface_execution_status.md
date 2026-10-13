@@ -4,6 +4,10 @@
 [`platform_adapter_interface_refactor_plan.md`](../plans/platform_adapter_interface_refactor_plan.md) 第 14 节的复选框和
 完成记录为准；本文不替代验收，也不把本地单元测试结果冒充 SITL 或目标硬件证据。
 
+本文的“本轮/当前”均指 2026-08-16 执行会话；Git 环境、测试数字、设备可用性和
+产品输入阻塞应在新会话重新核对。当前 production 路径见
+[当前架构](../architecture/current_architecture.md)。
+
 ## 1. 修改前基线与风险
 
 修改前事实已冻结在

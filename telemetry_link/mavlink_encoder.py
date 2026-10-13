@@ -8,7 +8,7 @@ from contracts.platform.vehicle_commands import (
     GlobalPositionTarget, Land, LocalPositionTarget, SetMode, SetServo, StopMotion,
     Takeoff, VehicleCommandEnvelope,
 )
-from .command_sender import CommandSender
+from .mavlink_command_encoder import MavlinkCommandEncoder
 from .frames import BODY_NED, LOCAL_NED
 from .models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
 from .ack_router import AckRouter, AckSlot
@@ -18,12 +18,10 @@ from pymavlink import mavutil
 class MavlinkEnvelopeWriter:
     """Typed, exactly-one writer that reuses the characterized MAVLink encoders."""
 
-    def __init__(self, encoder: CommandSender, *, ack_router: AckRouter | None = None,
+    def __init__(self, encoder: MavlinkCommandEncoder, *, ack_router: AckRouter | None = None,
                  link_session_id=lambda: "", target_system=lambda: 0,
                  target_component=lambda: 0, local_system=lambda: 0,
                  local_component=lambda: 0, source=lambda: "") -> None:
-        if not encoder.propagate_errors:
-            raise ValueError("typed writer requires propagate_errors=True")
         self.encoder = encoder
         self.ack_router = ack_router
         self.link_session_id = link_session_id
@@ -55,13 +53,13 @@ class MavlinkEnvelopeWriter:
             self._action(ActionType.LAND, {})
         elif isinstance(payload, LocalPositionTarget):
             params = {"x": payload.north_m, "y": payload.east_m, "z": payload.down_m,
-                      "frame": LOCAL_NED, "_speed_overrides": []}
+                      "frame": LOCAL_NED}
             if payload.yaw_rad is not None: params["yaw"] = payload.yaw_rad
             self._action(ActionType.LOCAL_POSITION, params)
         elif isinstance(payload, GlobalPositionTarget):
             params = {"lat": payload.latitude_deg,
                 "lon": payload.longitude_deg, "alt": payload.altitude_m,
-                "frame": 6, "_speed_overrides": []}
+                "frame": 6}
             if payload.yaw_rad is not None:
                 params["yaw"] = payload.yaw_rad
             self._action(ActionType.GLOBAL_GOTO, params)
@@ -123,4 +121,4 @@ class MavlinkEnvelopeWriter:
         ))
 
     def _action(self, action_type: ActionType, params: dict[str, object]) -> None:
-        self.encoder._send_action(ActionCommand(action_type, params, retries_left=0, created_at=time.time()))
+        self.encoder._send_action(ActionCommand(action_type, params, created_at=time.time()))

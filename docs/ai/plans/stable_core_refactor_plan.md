@@ -24,10 +24,14 @@
 ## 0. 文档状态与执行规则
 
 - 创建日期：2026-08-16。
-- 当前状态：`CF-00` 至 `CF-28` 均未开始。
+- 验收状态：`CF-00` 至 `CF-28` 均未通过正式验收，复选框保持未勾选。
+  部分核心契约、模型和 shadow/readiness 代码已经实现；具体范围和剩余门禁见
+  [执行状态记录](../records/stable_core_execution_status.md)，不得将“未验收”解释为“没有代码”。
 - 核心启动门禁：必须先验收 `PA-00～PA-20`；截至 2026-08-16 平台计划完成到 `PA-06`，因此当前
   跨计划下一项是 `PA-07`，不是 `CF-00`。
-- 当前工作区没有 `.git` 元数据，按“源码快照”处理；执行会话不得伪造 revision、diff 或 clean 状态。
+- 计划创建时的工作区没有可用 Git 元数据，历史基线按“源码快照”处理。
+  新会话必须重新检查当前 Git 状态：存在有效仓库时记录实际 revision、diff 和已有修改；
+  不存在时按源码快照处理，不得沿用历史环境结论或伪造状态。
 - 每个新会话只执行一个明确的 `CF-xx`，不得顺手推进下一项，也不得把多个 writer 切换合并完成。
 - 只有条目中所有验收和回滚条件完成后才可勾选；部分实现必须记录剩余项。
 - 与 `AGENTS.md`、平台契约、坐标规范或安全文档冲突时采用更严格规则。
@@ -223,7 +227,7 @@ config/action_missions/<mission>.json
 - 不在本计划中增加新飞控命令、扩大真实发送能力或把 INT8 YOLO 设为默认。
 - 不以文档完成代替代码、测试、SITL 和最终冻结门禁。
 
-## 4. 当前基线、代码规模与臃肿度
+## 4. 计划创建时的基线、代码规模与臃肿度
 
 以下为 2026-08-16 源码快照，按物理行（含空行和注释）计数。执行 `CF-00` 时必须重新统计；本表只
 说明计划为何这样拆分，不作为未来验收的固定行号。
@@ -254,7 +258,11 @@ Action 实现和算法不计入稳定核心。当前 `missions/common/actions/` 
 `missions/common/lifecycle/align_descend.py` 单文件 987 行。它们说明后续 Action 可独立瘦身，但不应
 促使核心重新吸收任务算法。
 
-### 4.1 当前真实工作流
+### 4.1 计划创建时的真实工作流
+
+以下图和风险表属于 2026-08-16 的修改前基线。随后 Web `/api/action-mission/tick`
+已改为只读兼容路由，PA-02 已封住 production `source=test` 回退；当前事实见
+[当前架构](../architecture/current_architecture.md) 和两份执行状态记录。
 
 ```mermaid
 flowchart TD
@@ -2578,12 +2586,13 @@ Web request_id / operation_id
 
 任一日志或 UI 不得跳过中间状态，把 operation accepted 直接展示成 vehicle executed。
 
-### 14.5 Manual move 与 active run
+### 14.5 待确认的 Manual move 设计与 active run
 
-Manual move 是普通 top-level Action Run，不是抢占旁路。若已有 active Action/Mission，新的 manual move start
+当前手动步进 Action/路由已退役；以下仅约束后续如获准恢复的设计，不是现有产品功能。
+Manual move 必须是普通 top-level Action Run，不是抢占旁路。若已有 active Action/Mission，新的 manual move start
 返回 typed conflict，不隐式替换。正式工作流只能是：Application 明确 request_stop 旧 run → 等 terminal
-RunSnapshot 和 required barrier terminal receipt → 使用新 operation key/start 创建新 run ID。当前“manual
-move 自动 stop 后立刻 start”的行为列为 EXPECTED_FIX，Web 可编排两次显式操作，但不能让一个 HTTP 请求
+RunSnapshot 和 required barrier terminal receipt → 使用新 operation key/start 创建新 run ID。早期“manual
+move 自动 stop 后立刻 start”的行为不能恢复，Web 可编排两次显式操作，但不能让一个 HTTP 请求
 直接 tick 或绕过 terminalization。
 
 ## 15. 冻结后的日常扩展方式
@@ -2803,7 +2812,9 @@ python -m compileall app application contracts execution field guidance missions
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/unit tests/contracts tests/integration
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/sitl
 python scripts/validate_action_missions.py
-python scripts/validate_architecture.py
+python scripts/validate_architecture_boundaries.py
+python scripts/validate_stable_core.py
+python scripts/validate_stable_core.py --strict  # 仅在最终 cutover/legacy 删除后才能通过
 ```
 
 若本机 Python 不可用，必须明确写“未运行”，使用 CI/目标环境补证据前不得完成切换任务。
@@ -3187,30 +3198,34 @@ python scripts/validate_architecture.py
 
   禁止：在本任务切 Dispatcher writer 或改变飞行高度/速度默认值。
 
-- [ ] **CF-09：准备并 shadow 验证 local/global 导航与手动移动 Effect Action**
+- [ ] **CF-09：准备并 shadow 验证导航 Effect Action 与待确认的手动移动设计**
 
   前置：CF-08；PA 坐标/command contracts ready。
 
-  目标：准备 goto/manual move/local/global target 的原生 Action/Effect contract，冻结 frame、单位和完成
+  目标：准备当前 goto GLOBAL target 的原生 Action/Effect contract，冻结 frame、单位和完成
   观察，在隔离 shadow 中验证；不改坐标数学，不切 production registration 或全局 Run owner。
 
-  主要范围：`goto_waypoint`、manual step/相关 Action、坐标 codec、guidance 调用边界、测试。
+  主要范围：`goto_waypoint`、坐标 codec、guidance 调用边界、测试。
+  早期计划中的 `manual_step` Action 和旧 Web 路由已退役；手动移动与 LOCAL_NED
+  发送恢复属于待重新确认的产品/安全设计，不是本项的自动迁移或验收前置。
 
   实现要求：
 
-  - 直接构造 LocalPositionTarget/GlobalPositionTarget；不得兼容多个字段别名进入 core。
-  - FIELD→LOCAL_NED 转换继续使用唯一 Field/coordinate service，Action pin 同一 FieldReferenceVersion。
+  - 当前航点直接构造 GlobalPositionTarget；不得兼容多个字段别名进入 core。
+    core 中已有 LocalPositionTarget 类型不代表当前 production Action 已获发送权限。
+  - FIELD→GPS/GLOBAL 转换继续使用唯一 `field/coordinates.py`，Action pin 同一 FieldReferenceVersion。
+    schema v3 不提供 FIELD→LOCAL_NED 原点，不得恢复该转换或伪造 local origin。
   - 发送与达到目标分离：ACCEPTED 不等于位置完成，完成条件读后续 typed snapshot/command completion。
-  - 本任务把 manual move 实现为正式 `manual_step` ActionDefinition/ActionModule，禁止新增 Web→command 直发；
-    CF-22 冻结 top-level Run 模型、CF-25 才让它与 Mission 共用唯一 active slot。CF-09 期间旧 Web 外层行为
-    仍由现有 compatibility lifecycle 承担，不得宣称已经具备全局 Run 互斥或顺手改变 active Mission 语义。
+  - 若后续明确批准手动移动设计，只能使用受授权的 ActionDefinition/ActionModule，禁止新增 Web→command 直发；
+    CF-22 冻结 top-level Run 模型、CF-25 才让它与 Mission 共用唯一 active slot。
+    CF-09 不恢复旧 Web 手动步进入口，不得宣称已经具备全局 Run 互斥或顺手改变 active Mission 语义。
   - 删除 dispatcher/handler 对 `goto_local_ned`、`local_position` 方法名和 signature 的动态探测；在
     production writer 切换前由平台 compat adapter 单点处理。
 
   定向测试：NED 方向/单位、Field version 变化、source/session stale、accepted-not-complete、goal timeout、
-  manual move Effect/policy contract、旧新 trace；全局互斥和显式 stop→terminal→new run 归 CF-25。
+  旧新 trace；获准的手动移动另补 Effect/policy contract，全局互斥和显式 stop→terminal→new run 归 CF-25。
 
-  验收：相关原生 Action 在 shadow catalog 完整 typed；manual_step shadow registration 不越权创建第二 Run
+  验收：相关原生 Action 在 shadow catalog 完整 typed；任何获准的手动移动 shadow registration 不越权创建第二 Run
   owner；production 继续由单一 legacy registration 工作且 hit 可观察，shadow 不 submit。
 
   回滚：关闭 shadow registration；坐标公式和 Field writer 不回滚/复制。
@@ -3227,7 +3242,7 @@ python scripts/validate_architecture.py
   主要文件：
 
   ```text
-  missions/common/lifecycle/align_descend.py
+  missions/common/actions/align_descend.py
   对应 Action wrapper/definition/codec
   guidance/align_descend.py（仅必要纯算法接口）
   execution compat adapter/hit counter
@@ -3246,7 +3261,7 @@ python scripts/validate_architecture.py
   - shadow 只连接 fake Dispatcher/Port；production 仍单选原 legacy class/registration，不能注册
     `LegacyActionShadowAdapter`，也不能同时启用 typed continuous submit。CF-25 切换前必须再次完成
     barrier/空队列门禁。
-  - 本任务只改接口与状态分层，不把 987 行一次性全面重写；需要瘦身另开单 Action 任务。
+  - 本任务只改接口与状态分层，不按历史行数一次性全面重写；需要瘦身另开单 Action 任务。
 
   定向测试：manual clock refresh、scheduler stall、target stale、source switch、stop zero/barrier、late stream
   generation、no residual effect after fail、golden velocity trace。

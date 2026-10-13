@@ -1,236 +1,73 @@
 # Telemetry Command Audit
 
-对照对象：
+本文核对当前 `MavlinkEnvelopeWriter` 与同步 `MavlinkCommandEncoder` 的编码行为。
+旧文本命令解析器、独立 telemetry 终端入口、CommandSender 线程和旧队列已删除。
+正式人工入口是 Web UI，Action 请求经过运行时、Dispatcher、SEND/授权与 Safety Pipeline；
+低层支持某个命令不代表 Action policy 允许它。
 
-- ArduPilot Copter Guided mode command notes
-- ArduPilot gimbal/mount command notes
-- MAVLink command parameter definitions
+协议参考：[MAVLink common 命令定义](https://mavlink.io/en/messages/common.html)、
+[ArduPilot Copter Guided 命令说明](https://ardupilot.org/dev/docs/copter-commands-in-guided-mode.html)。
 
-## 已修正
+## 机体速度与停止
 
-### `body_vel` / `yaw_rate` / `stop`
+当前 BodyVelocity 使用 `SET_POSITION_TARGET_LOCAL_NED`，frame 为 BODY_NED：
 
-底层都使用 `SET_POSITION_TARGET_LOCAL_NED`。
+- 提供完整的前/右/下三轴速度，单位 m/s。
+- 未提供 yaw/yaw rate 时 mask 忽略两者。
+- 提供 yaw 时使用速度 + yaw；提供 yaw rate 时使用速度 + yaw rate。
+- yaw 与 yaw rate 不能同时指定；编码器拒绝该组合。
+- yaw 单位 rad，yaw rate 单位 rad/s。
 
-ArduPilot Copter 对 Guided 运动命令要求：
+ArduPilot Guided 的偏航目标不能脱离位置/速度/加速度三轴单独作为 setpoint。
+停止屏障使用 StopMotion，显式发送三轴零速及零 yaw rate，并由 broker 取消陈旧连续命令。
+不能以删除队列或等待遥测超时替代零/停止指令。
 
-- 速度目标必须提供完整 `vx/vy/vz`
-- `yaw_rate` 不能单独作为唯一目标
-- 要做偏航角速度控制时，应同时给速度三轴，速度可为 `0`
+## 位置目标与阶段速度
 
-原实现的问题：
+GlobalPositionTarget 使用 `SET_POSITION_TARGET_GLOBAL_INT`，当前 typed writer 固定为
+GLOBAL_RELATIVE_ALT_INT（frame 6），高度相对 Home；经纬度编码为度乘 1e7。
+LocalPositionTarget 使用 LOCAL_NED，单位米，z 正向向下；当前 FIELD 航点只生成 GPS/GLOBAL。
+两类位置目标的可选 yaw 均为 rad。
 
-- `VELOCITY` 类型 mask 屏蔽了 `yaw_rate`，所以上层统一控制里的 `yaw_rate` 会被飞控忽略
-- `YAW_RATE` 类型只发送 yaw_rate，不发送有效的速度三轴目标，ArduPilot Copter 下可能不生效
+ChangeSpeed 使用 `MAV_CMD_DO_CHANGE_SPEED`，typed writer 当前固定地速类型 1。
+底层编码器虽保留位置切换后的速度重发能力，v2 adapter/typed envelope 未携带速度覆盖，
+writer 传入 `_speed_overrides=[]`；不能声称当前模式切换后一定会重发阶段速度。
+此缺口须单独验证和修复，不在旧链路删除任务中顺带更改发送行为。
 
-当前实现：
+## 一次性命令
 
-- `VELOCITY` 和 `STOP` 只发送速度三轴，type mask 同时屏蔽 `yaw` 和 `yaw_rate`。
-- 自动平移、视觉对准和停止不会主动控制偏航轴，机头方向由飞控保持。
-- 显式人工 `yaw_rate` 命令仍发送速度三轴 + `yaw_rate`，type mask 等效为
-  ArduPilot 示例里的 `1479`。
-- `yaw_rate` 单独命令会用 `vx=vy=vz=0` 搭配目标偏航角速度。
+| Typed 请求 | MAVLink 编码 | 当前参数 |
+| --- | --- | --- |
+| Arm | MAV_CMD_COMPONENT_ARM_DISARM | param1 为 1 或 0 |
+| Takeoff | MAV_CMD_NAV_TAKEOFF | param7 为目标高度米 |
+| Land | MAV_CMD_NAV_LAND | 当前参数为 0，当前位置降落 |
+| SetMode | pymavlink mode_mapping + set_mode | 按飞控模式映射校验名称 |
+| ConditionYaw | MAV_CMD_CONDITION_YAW | yaw 度，速度固定 20°/s，direction 固定 0；保留 relative 标志 |
+| SetServo | MAV_CMD_DO_SET_SERVO | param1 为 SERVO 输出通道，param2 为 PWM 微秒 |
+| GimbalAngle | MAV_CMD_DO_MOUNT_CONTROL | typed yaw/pitch rad 转成度；roll 固定 0，mount mode 来自配置 |
+| GimbalRate | MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW | pitch/yaw rate rad/s 转成 deg/s，角度目标为 NaN |
 
-## 已核对，暂不改
+发出 Takeoff/Land/位置命令不等于 Action 已完成；完成判断仍依赖新鲜状态反馈。
+云台角度以真实反馈为准，不得用发送目标替代姿态。
 
-### `arm` / `disarm`
+## 消息频率请求
 
-使用 `MAV_CMD_COMPONENT_ARM_DISARM`：
+连接建立时，运行时可直接调用同步编码器请求遥测频率；这是消息订阅，不是飞行控制。
+`request_message_interval` 使用 `MAV_CMD_SET_MESSAGE_INTERVAL`：
 
-- param1 `1` = arm
-- param1 `0` = disarm
+- param1 为 message ID；
+- 正频率按 `int(1e6 / rate_hz)` 编码 interval 微秒；
+- 当前编码器对非正频率发送 interval -1，表示禁用该消息流；
+- 协议 interval 0 才是请求默认频率，与 -1 不同。
 
-### `takeoff`
+语义已对照 [MAV_CMD_SET_MESSAGE_INTERVAL](https://mavlink.io/en/messages/common.html#MAV_CMD_SET_MESSAGE_INTERVAL)。
+旧诊断文本 `default` 别名随解析器删除，不再作为可用操作命令。
 
-使用 `MAV_CMD_NAV_TAKEOFF`，当前只填 param7 `altitude_m`。
+## 投放与发送归属
 
-这个用法适合 Copter Guided 起飞。更完整的版本可以补 yaw/lat/lon，但对当前终端命令不是必须。
+唯一投放路径为 `payload_release` Action -> 授权与 payload 白名单 -> `set_servo`。
+旧 `release_payload` 方法、枚举和编码分支已删除，不存在载荷映射 fallback，也不得使用 RC override。
+SERVO 输出通道与 RC 输入通道不同，PWM 必须经过实物空载验证。
 
-### `land`
-
-使用 `MAV_CMD_NAV_LAND`，所有参数填 `0`。
-
-这会触发当前位置降落。若以后需要指定降落点，可补 lat/lon/alt。
-
-### `mode`
-
-使用 pymavlink 的 `mode_mapping()` + `set_mode()`。
-
-这条依赖飞控固件返回的模式映射，适合 ArduPilot。输入拼错会被拒绝，例如日志里的 `guild` 不会被误发。
-
-### `gimbal`
-
-当前走 `MAV_CMD_DO_MOUNT_CONTROL`：
-
-- param1 pitch
-- param2 roll
-- param3 yaw
-- param7 mount mode
-
-这符合 ArduPilot mount v1 路径。若你的云台只支持 gimbal v2，建议改成或新增 `MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW` 角度模式。
-
-### `gimbal_rate`
-
-当前走 `MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW`：
-
-- param1/2 为 `NaN`，表示不使用角度目标
-- param3 pitch rate，单位 `deg/s`
-- param4 yaw rate，单位 `deg/s`
-- param5 yaw follow/lock flags
-- param7 gimbal device id
-
-这符合 ArduPilot gimbal v2 速率路径。
-
-### `request_message_interval`
-
-使用 `MAV_CMD_SET_MESSAGE_INTERVAL`：
-
-- param1 message id
-- param2 interval us
-- `rate_hz <= 0` 时发送 `-1`，表示恢复默认/停止自定义间隔
-
-## 已补充
-
-### `arm throttle`
-
-兼容 MAVProxy 常用写法，等同于 `arm`。
-
-### `condition_yaw`
-
-格式：
-
-```text
-condition_yaw <yaw_deg> [speed_deg_s] [cw|ccw|shortest] [absolute|relative]
-```
-
-使用 `MAV_CMD_CONDITION_YAW`。
-
-### `change_speed`
-
-格式：
-
-```text
-change_speed <speed_mps> [ground|air|climb|descent]
-```
-
-使用 `MAV_CMD_DO_CHANGE_SPEED`。
-
-### `set_home`
-
-格式：
-
-```text
-set_home current
-set_home <lat> <lon> <alt_m>
-```
-
-使用 `MAV_CMD_DO_SET_HOME`。
-
-### `global_goto`
-
-格式：
-
-```text
-global_goto <lat> <lon> <alt_m> [relative|global|terrain]
-```
-
-使用 `SET_POSITION_TARGET_GLOBAL_INT` 的位置目标。默认 `relative`。
-
-### `local_pos`
-
-格式：
-
-```text
-local_pos <x_m> <y_m> <z_m> [local|offset|body|body_offset]
-```
-
-使用 `SET_POSITION_TARGET_LOCAL_NED` 的位置目标。默认 `body_offset`。
-
-### `reposition`
-
-格式：
-
-```text
-reposition <lat> <lon> <rel_alt_m> [groundspeed_mps] [yaw_deg]
-```
-
-使用 `MAV_CMD_DO_REPOSITION` + `COMMAND_INT`。
-
-### `set_roi_location`
-
-格式：
-
-```text
-set_roi_location <lat> <lon> <alt_m>
-```
-
-使用 `MAV_CMD_DO_SET_ROI_LOCATION` + `COMMAND_INT`。
-
-### `roi_none`
-
-格式：
-
-```text
-roi_none [gimbal_device_id]
-```
-
-使用 `MAV_CMD_DO_SET_ROI_NONE` + `COMMAND_INT`。
-
-### `gimbal_manager_configure`
-
-格式：
-
-```text
-gimbal_manager_configure [gimbal_device_id] [primary_sysid primary_compid]
-```
-
-使用 `MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE`。
-
-不传 `primary_sysid/primary_compid` 时，发送层会使用当前 MAVLink 连接的源 system/component id。
-
-### `set_message_interval`
-
-格式：
-
-```text
-set_message_interval <MESSAGE_NAME> <rate_hz|default>
-message_interval <MESSAGE_NAME> <rate_hz|default>
-```
-
-使用 `MAV_CMD_SET_MESSAGE_INTERVAL`。`default` 会发送 `rate_hz=-1`。
-
-### `set_servo`
-
-格式：
-
-```text
-set_servo <channel> <pwm>
-```
-
-使用 `MAV_CMD_DO_SET_SERVO`：
-
-- param1 servo channel
-- param2 pwm
-
-### `set_relay`
-
-格式：
-
-```text
-set_relay <relay_id> <on|off>
-```
-
-使用 `MAV_CMD_DO_SET_RELAY`：
-
-- param1 relay number
-- param2 `0` / `1`
-
-### `release_payload`
-
-格式：
-
-```text
-release_payload <payload_id>
-```
-
-本阶段先安全拒绝未配置载荷映射，不把比赛专用映射写进底层。后续需要通过配置声明 `payload_id -> servo/relay action` 后再启用。
+CommandBrokerWorker 是当前 wire 调度者，同步编码器不启动线程、不读取旧队列、不做命令重试。
+ACK 相关状态由 broker/ACK router 管理，不能把 ACK 或服务存活当作动作到位证明。

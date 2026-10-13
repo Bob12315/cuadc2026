@@ -25,6 +25,17 @@ def py_files(directory: str) -> list[Path]:
 
 def main() -> None:
     errors: list[str] = []
+    retired_entrypoints = (
+        "app/mission_runner.py", "app/stage_registry.py",
+        "telemetry_link/command_sender.py", "telemetry_link/command_queue.py",
+        "telemetry_link/command_shadow.py", "telemetry_link/command_dispatcher.py",
+        "telemetry_link/rate_controller.py", "telemetry_link/state_publisher.py",
+        "tools/telemetry_debug.py", "tools/fusion_debug.py",
+        "scripts/config/save_rk3588_real.sh", "scripts/config/save_rk3588_sitl.sh",
+    )
+    for relative_path in retired_entrypoints:
+        if (ROOT / relative_path).exists():
+            errors.append(f"retired runtime entrypoint present: {relative_path}")
     for path in py_files("contracts"):
         leaked = imports(path) - {"__future__", "abc", "collections", "contracts", "copy", "dataclasses", "datetime", "enum", "hashlib", "json", "math", "time", "typing", "uuid"}
         if leaked:

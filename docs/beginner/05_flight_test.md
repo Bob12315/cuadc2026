@@ -160,8 +160,9 @@ schema v3 生成 FIELD → GPS/GLOBAL 任务几何，不建立 LOCAL_NED 场地�
 ### F. 完整比赛任务
 
 只有所有分项通过后，才使用经批准的
-`config/action_missions/rescue_2026_full_auto.json`。先以 SEND OFF 完整干跑，再在
-保守参数下实飞。任务模板、速度、高度、场地 profile、两个 SERVO 输出和失败恢复路径
+`config/action_missions/rescue_2026_full_auto.json`。先以 SEND OFF 检查模板、地图预览、
+前置条件和只读状态；SEND OFF 不会使飞机运动，不能据此宣称完整飞行流程已验证。
+完整流程应先在 SITL 验证，再在保守参数下实飞。任务模板、速度、高度、场地 profile、两个 SERVO 输出和失败恢复路径
 必须由第二人复核。
 
 ## 六、每次自动动作前口令
@@ -243,17 +244,20 @@ Field Reference 正确？
 
 ## 八、现场故障快速排查
 
-先执行固定动作：关闭 SEND、停止 Mission、实机拆桨和移除载荷，并记录故障时间、最近
-改动及 `git status --short`。不要删除日志或覆盖配置。
+飞行中先由飞手或地面站接管并安全落地；地面排查前关闭 SEND、停止 Mission、断电拆桨
+和移除载荷，并记录故障时间、最近改动及 `git status --short`。不要删除日志或覆盖配置。
 
 ```bash
-bash scripts/healthcheck/check_rk3588.sh
 systemctl --user --no-pager --full status uav-app.service uav-yolo.service
 journalctl --user -u uav-app.service -n 150 --no-pager
 journalctl --user -u uav-yolo.service -n 150 --no-pager
 ss -lntu | grep -E ':(5005|5006|8080|8081|14550|15001)\b'
 python scripts/validate_action_missions.py
 ```
+
+完整 `scripts/healthcheck/check_rk3588.sh` 会创建 RKNN runtime 并执行空白帧推理，
+只能在 YOLO 服务未运行、无人机处于地面安全状态时按实际环境名执行，避免与已有推理
+进程并行占用 NPU。运行中的服务先查上述状态和日志；环境名以 unit 的 `ExecStart` 为准。
 
 ### Field Reference 无法完成
 

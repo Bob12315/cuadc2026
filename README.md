@@ -39,17 +39,31 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 当前项目包含以下能力：
 
 - 目标识别与跟踪
-- 多视角目标定位
+- 目标 GPS 粗定位（双目标分项支持多视角采集）
 - 双目标自动投放
-- 区域侦察与结果整理
+- 区域侦察航迹与实时识别
 - 自动返航
 - H 标志视觉辅助降落
 - Web UI 操作界面
 - ArduPilot + Gazebo SITL 仿真
 
-点击下方动图可打开[完整比赛飞行视频](docs/assets/readme/flight-demo.mp4)。
+[完整比赛飞行视频](docs/assets/readme/flight-demo.mp4)
 
-[![比赛飞行过程预览](docs/assets/readme/flight-demo-preview.gif)](docs/assets/readme/flight-demo.mp4)
+![比赛飞行过程预览](docs/assets/readme/flight-demo.webp)
+
+[Web UI 操作实录](docs/assets/readme/webui-demo.mp4)
+
+![Web UI 操作实录预览](docs/assets/readme/webui-demo.webp)
+
+[国赛比赛投弹视频](docs/assets/readme/payload-drop-demo.mp4)
+
+![国赛比赛投弹预览](docs/assets/readme/payload-drop-demo.webp)
+
+飞机照片
+
+![飞机照片 1](docs/assets/readme/drone-01.jpg)
+
+![飞机照片 2](docs/assets/readme/drone-02.jpg)
 
 ### YOLO 识别
 
@@ -62,6 +76,7 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 ### Gazebo SITL
 
 ![Gazebo SITL 中的无人机与比赛场地](docs/assets/readme/gazebo-sitl.webp)
+
 ## 比赛任务
 
 当前完整流程由
@@ -73,11 +88,11 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
   ↓
 起飞
   ↓
-投放区多视角识别与定位
+投放区中心识别与定位
   ↓
 目标选择与自动投放
   ↓
-侦察区识别
+侦察区航迹（实时识别）
   ↓
 返航
   ↓
@@ -90,7 +105,7 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 
 ### 低成本
 
-使用 RK3588 作为机载计算平台和普通摄像头，GPS，没有使用图传和数传，深度相机，激光雷达等等。
+使用 RK3588 作为机载计算平台，搭配普通下视相机和普通 GPS，没有使用图传、数传、深度相机或激光雷达。
 
 ### 简单架构
 
@@ -114,14 +129,8 @@ YOLO 使用 RKNNLite 在 RK3588 NPU 本地运行，减少对云端视觉服务�
 
 浏览器可用于查看状态、初始化比赛场地、测试 Action 和运行 Mission。
 
-Web 默认只监听 `127.0.0.1`，启动前必须通过环境变量提供单操作者口令：
-
-```bash
-export UAV_WEB_OPERATOR_PASSWORD='请替换为现场强口令'
-```
-
-也可以设置 `UAV_WEB_OPERATOR_PASSWORD_FILE` 指向仅当前用户可读的权限文件。不要把口令
-写入受 Git 跟踪的 YAML。非回环部署还必须同步配置 `allowed_hosts` 和 `allowed_origins`。
+启动前需设置操作者口令环境变量 `UAV_WEB_OPERATOR_PASSWORD`（或 `UAV_WEB_OPERATOR_PASSWORD_FILE`
+指向权限受限的凭据文件），不要将口令写入受 Git 跟踪的 YAML。
 
 ### SITL
 
@@ -161,12 +170,13 @@ ArduPilot
 - 部分视觉、投放和飞行参数需要根据不同飞机重新标定；
 - SITL 与真实飞行仍存在差异；
 - 任务级流程已由原子 Action 和 Action Mission 模板表达；
+- 当前正式侦察模板尚未接入自动采集、融合、危险标识排名和报告生成；
 - 自动化测试覆盖仍需要提升；
 - 飞行安全、异常恢复和边界情况仍有继续完善空间；
 - 文档仍在持续整理。
 
-如果你发现问题，欢迎提交 [Issue](https://github.com/Bob12315/uav_system-rk3588/issues) 或
-[Pull Request](https://github.com/Bob12315/uav_system-rk3588/pulls)。
+如果你发现问题，欢迎提交 [Issue](https://github.com/Bob12315/cuadc2026/issues) 或
+[Pull Request](https://github.com/Bob12315/cuadc2026/pulls)。
 
 ## 文档
 
@@ -202,14 +212,14 @@ ArduPilot
 | 操作界面 | Web UI |
 | 投放 | 双路 Servo |
 
-具体飞控、机架、电机、电调、电池和相机型号不能从代码推断，真实 BOM 需要由装机团队补充。
-请从[硬件配置清单](docs/beginner/02_hardware_bom.md)开始记录。
+装机型号与参考价格见[硬件配置清单](docs/beginner/02_hardware_bom.md)。复现时应按实际采购
+和装机情况复核，不能只从软件配置推断硬件型号。
 
 ## 快速开始
 
 ```bash
-git clone https://github.com/Bob12315/uav_system-rk3588.git
-cd uav_system-rk3588
+git clone https://github.com/Bob12315/cuadc2026.git
+cd cuadc2026
 ```
 
 完整安装和部署请从[RK3588 环境配置](docs/beginner/03_rk3588_setup.md)开始。

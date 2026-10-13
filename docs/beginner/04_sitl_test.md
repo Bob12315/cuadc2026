@@ -7,10 +7,16 @@
 
 预计时间：半天以上。需要准备：运行 ArduPilot SITL 的电脑、RK3588 和局域网。
 
+本章把操作分成两类：
+
+- **AI 完成**：备份实机配置、应用 SITL profile、重启板端服务、检查各阶段状态。把"AI
+  提示词"小节整段发给 AI Coding Agent 即可，无需自己敲命令。
+- **用户完成**：只有一条，在 RK3588 仓库根目录运行启动脚本，其余步骤通过 Web UI
+  操作。
+
 ## 1. 理解测试拓扑
 
-推荐让电脑运行 Gazebo 和 ArduPilot SITL，让 RK3588 继续运行与实机相同的 app、
-RKNNLite 和 Web UI：
+电脑运行 Gazebo 和 ArduPilot SITL，RK3588 继续运行与实机相同的 app、RKNNLite 和 Web UI：
 
 ```text
 电脑：Gazebo 相机 + ArduPilot SITL
@@ -30,138 +36,88 @@ RK3588：YOLO + Action Mission + Web UI
 电脑需要安装并验证 ArduPilot SITL、Gazebo、`ardupilot_gazebo`、GStreamer 和对应世界。
 这些依赖因电脑系统不同而变化，不属于 RK3588 板端安装脚本的职责。
 
-## 2. 保存现场配置
+## 2. AI 提示词：切换 SITL 配置
 
-切换 profile 会覆盖当前生效配置。先检查并保存需要保留的实机调参：
-
-```bash
-git status --short
-bash scripts/config/save_rk3588_real.sh
-```
-
-确认 `config/app.yaml` 中 `executor.send_commands: false`，再应用 SITL profile：
-
-```bash
-bash scripts/config/apply_rk3588_sitl.sh
-```
+> 在本仓库根目录，把当前实机配置备份到 `runtime/config-backups/before-sitl-<时间戳>/`
+> （先运行 `git status --short` 并展示给我，再备份 `config/app.yaml`、
+> `config/telemetry.yaml`、`config/yolo.yaml`），确认 `config/app.yaml` 中
+> `executor.send_commands: false` 后应用 SITL profile。完成后报告备份路径、diff 摘要
+> 和 `send_commands` 的值。不要动 Mission 模板和其他配置。
 
 SITL profile 默认接收 MAVLink UDP 14550，YOLO 视频源为 UDP 5600，模型为
-`gazebo_dataset-fp16.rknn`。
+`gazebo_dataset-fp16.rknn`。切换 profile 只改 telemetry/YOLO 差异；需要长期保留的实机
+差异应人工核对后写入 `config/profiles/rk3588-real/profile.yaml`。
 
-## 3. 启动 Gazebo 和 SITL
+## 3. 启动仿真（用户唯一操作）
 
-仓库提供辅助脚本：
-
-```bash
-bash scripts/run_iris_gimbal_sitl.sh
-```
-
-也可以在电脑上分别启动各组件。下面路径按你的实际安装位置修改：
+确认电脑到 RK3588 网络可达后，在 RK3588 仓库根目录运行：
 
 ```bash
-# 终端 1：Gazebo
-cd <ardupilot_gazebo工作区>/worlds
-gz sim -v4 -r iris_runway.sdf
-
-# 终端 2：ArduPilot SITL，把 MAVLink 发给 RK3588
-cd <ardupilot源码目录>
-./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON \
-  --add-param-file=<ardupilot_gazebo工作区>/config/gazebo-iris-gimbal.parm \
-  --console --out=udp:<RK3588-IP>:14550
+GCS_HOST="<RK3588-IP>" VIDEO_HOST="<RK3588-IP>" bash scripts/run_iris_gimbal_sitl.sh
 ```
 
-打开 Gazebo 相机流：
+脚本在同一个终端窗口（或四个独立终端）中自动启动：
 
-```bash
-gz topic \
-  -t /world/iris_runway/model/iris_with_gimbal/model/gimbal/link/pitch_link/sensor/camera/image/enable_streaming \
-  -m gz.msgs.Boolean -p "data: 1"
-```
+- Gazebo（`cuadc2026_rescue` world，固定下视相机）；
+- ArduCopter SITL（MAVLink 发到 `udp:<RK3588-IP>:14550`，投放 bridge 发到本机 14551）;
+- 载荷投放 bridge（`payload_release_bridge.py`）；
+- 相机 RTP relay（延迟 10 s 后打开相机流，把 H264/RTP 从电脑本机 5600 转发到
+  `udp:<RK3588-IP>:5600`）。
 
-若 Gazebo 默认把 H264/RTP 发到电脑 `127.0.0.1:5600`，可在电脑转发到 RK3588：
+默认值是队伍现场地址 `10.101.31.108`，必须用环境变量替换。路径类变量
+（`ARDUPILOT_DIR`、`GZ_REPO_DIR`、`GZ_PARAM_FILE`、`GZ_WORLD`）默认指向维护者本机，
+安装位置不同的电脑用同名环境变量覆盖。脚本会自动启用相机流并转发视频，不要再手动运行
+`gz topic ... enable_streaming` 或 GStreamer 转发，以免争用 UDP 5600。
 
-```bash
-gst-launch-1.0 -v \
-  udpsrc port=5600 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" \
-  ! rtph264depay \
-  ! h264parse \
-  ! rtph264pay config-interval=1 pt=96 \
-  ! udpsink host=<RK3588-IP> port=5600
-```
+比赛 world、固定相机参数和投放 bridge 来自
+[本项目场景 fork](https://github.com/Bob12315/ardupilot_gazebo)。
 
-先确认仿真飞控可以被地面站连接、电脑到 RK3588 网络可达，再启动板端软件。
+## 4. AI 提示词：启动 RK3588 板端
 
-## 4. 启动 RK3588
+> 应用 SITL profile 后，在无人机不连接真实飞控、SEND OFF、没有运行 Action/Mission 的
+> 状态下重启用户服务加载配置：
+> `systemctl --user restart uav-yolo.service uav-app.service`，然后用
+> `systemctl --user --no-pager --full status uav-yolo.service uav-app.service` 报告
+> 状态。如果服务已配置操作者口令（systemd drop-in），不要改动凭据文件；没有 systemd
+> 服务时，提示我在两个终端分别用 conda 环境手动启动 `python -m yolo_app.main --source
+> 5600` 和 `python -m app.main --connect-telemetry --send-commands false`（手动启动需要
+> 先安全提供 `UAV_WEB_OPERATOR_PASSWORD`，不要让我在聊天里贴口令）。
+>
+> Web UI 地址：`http://<RK3588-IP>:8080/`，视频流：
+> `http://<RK3588-IP>:8081/video/yolo.mjpeg`。
 
-应用 SITL profile 后可使用 systemd：
+## 5. AI 提示词：观察连接（只读）
 
-```bash
-systemctl --user restart uav-yolo.service uav-app.service
-systemctl --user --no-pager --full status uav-yolo.service uav-app.service
-```
+保持 SEND=OFF，启动 app/yolo 后：
 
-或手动启动：
+> 保持 SEND=OFF 只观察，不要开 SEND、不要启动任何 Action/Mission。用
+> `curl http://<RK3588-IP>:8080/api/status` 和 journalctl 日志逐项确认并报告：
+> telemetry data_source/active_source 是 sitl；heartbeat、GPS、姿态、LOCAL_NED 在更新；
+> 仿真视频和 YOLO scene 更新（perception 不 stale）；Web UI 显示 SEND OFF；没有任务自动
+> 启动。
 
-```bash
-# 终端 1
-conda activate yolo
-python -m yolo_app.main --source 5600
+## 6. AI 提示词：建立 SITL Field Reference
 
-# 终端 2
-conda activate app
-python -m app.main --connect-telemetry --send-commands false
-```
+> 在 Web UI 的 Competition Field Setup 输入 SITL 场地的 forward marker B，在起飞点完成
+> schema v3 GPS runtime sampling。确认 `FIELD→GPS` 已就绪、`FIELD→LOCAL_NED` 保持不可用，
+> 并核对 Web 地图 `+Y` 前方、`+X` 右方与仿真运动方向一致。方向相反立即停止任务，不能靠
+> 临时交换 x/y 或改符号掩盖。
 
-浏览器访问 `http://<RK3588-IP>:8080/`，视频流是
-`http://<RK3588-IP>:8081/video/yolo.mjpeg`。
+## 7. AI 提示词：从低风险 Action 开始
 
-## 5. 只观察连接
+> 按风险从低到高逐项验证，一次只改一个变量，每步报告结果后才继续下一步：只读/识别
+> Action → 场地坐标预览 → 单个低速航点 → stop/reset/skip → 起飞与降落分项 → 投放请求
+> （无真实机构）→ 分项 Mission → 完整 `rescue_2026_full_auto`。只有在确认仿真场地、
+> 速度、高度和遥控接管后，才在 SITL 中开启系统 SEND，并为本次 SITL Action/Mission 建立
+> run 授权。
 
-保持 SEND=OFF，启动 app/yolo，确认：
+## 8. AI 提示词：必测失败路径
 
-- telemetry data_source/active_source 是 sitl；
-- heartbeat、GPS、姿态、LOCAL_NED 更新；
-- 仿真视频和 YOLO scene 更新；
-- Web UI 明确显示 SEND OFF；
-- 没有任务自动启动。
-
-## 6. 建立 SITL Field Reference
-
-在 Web UI 的 Competition Field Setup 输入 SITL 场地的 forward marker B，并在起飞点完成
-schema v3 GPS runtime sampling。确认 `FIELD→GPS` 已就绪而 `FIELD→LOCAL_NED` 保持不可用，
-以及 Web 地图上 `+Y` 前方、`+X` 右方与仿真运动一致。
-
-## 7. 从低风险 Action 开始
-
-按风险逐步验证：
-
-```text
-只读/识别 Action
-→ 场地坐标预览
-→ 单个低速航点
-→ stop/reset/skip
-→ 起飞与降落分项
-→ 投放请求（无真实机构）
-→ 分项 Mission
-→ 完整 rescue_2026_full_auto
-```
-
-只有在确认仿真场地、速度、高度和遥控接管后，才在 SITL 中开启系统 SEND，并为本次
-SITL Action/Mission 建立 run 授权。一次只改变一个变量。
-
-## 8. 必测失败路径
-
-- Action 运行中点击 Stop；
-- 连续 BODY_NED Action 丢失视觉目标；
-- Mission 中断、Reset 和 Skip Current；
-- telemetry 断线和恢复；
-- yolo 停止和恢复；
-- Field Reference 未确认或未冻结时启动 Mission；
-- 投放步骤失败后的恢复路径；
-- 限速阶段结束后速度恢复；
-- 视觉降落失败后 LAND 兜底。
-
-确认停止或失败不会恢复旧速度、旧位置目标或重复投放请求。
+> 逐一注入以下失败，确认停止或失败后不会恢复旧速度、旧位置目标或重复投放请求，逐项
+> 报告结果：Action 运行中点击 Stop；连续 BODY_NED Action 丢失视觉目标；Mission 中断、
+> Reset 和 Skip Current；telemetry 断线和恢复；yolo 停止和恢复；Field Reference 未确认
+> 或未冻结时启动 Mission；投放步骤失败后的恢复路径；限速阶段结束后速度恢复；视觉降落
+> 失败后 LAND 兜底。
 
 ## 9. 常见问题
 
@@ -193,8 +149,8 @@ x/y 或修改符号来掩盖问题。
 
 ## 10. 保存结果
 
-记录使用的 commit、profile、Mission 模板、参数、SITL 起点、每个失败注入结果和日志路径。
-运行产物放在 `runtime/`，不要把临时 SITL 文件写进配置目录。
+> 记录本次 SITL 使用的 commit、profile、Mission 模板、参数、SITL 起点、每个失败注入结果
+> 和日志路径。运行产物放在 `runtime/`，不要把临时 SITL 文件写进配置目录。
 
 ## SITL 验收清单
 
@@ -202,13 +158,16 @@ x/y 或修改符号来掩盖问题。
 - [ ] FIELD 方向和航点方向经过实际仿真运动验证。
 - [ ] stop/reset/skip 和丢目标路径均停止旧命令。
 - [ ] 投放步骤不会重复或绕过 dispatcher。
-- [ ] 完整 v2 模板在保守参数下完成一次。
+- [ ] 完整 `rescue_2026_full_auto.json` 模板在保守参数下完成一次。
 - [ ] SITL 的 SEND 开启没有被带回实机配置。
 
-返回实机配置前再次确认 `executor.send_commands: false`：
+## AI 提示词：恢复实机配置
 
-```bash
-bash scripts/config/apply_rk3588_real.sh
-```
+> SITL 结束后，先在 Web UI 关闭系统 SEND、停止 Mission，确认配置中的
+> `executor.send_commands: false`。然后应用实机 profile：`bash
+> scripts/config/apply_rk3588_real.sh`。应用后展示 diff，人工核对实机差异；profile 是
+> 增量合并，不保证恢复未列入差异文件的每一项，必要时对照 `runtime/config-backups/` 的
+> SITL 前备份恢复。确认模型、视频输入和飞控链路后，在无任务、SEND OFF 的状态下重新
+> 加载服务。
 
 下一章：[实飞测试](05_flight_test.md)。

@@ -2,6 +2,11 @@
 
 最后复验：2026-08-13
 
+本文为该日期的验收记录；测试数、SITL 动作清单（含当时 LOCAL_NED goto）
+和产物路径不代表当前任务模板或本次复验结果。当前 production 路径见
+[当前架构](../architecture/current_architecture.md)，正式航点输入见
+[Action 契约](../architecture/action_contracts.md)。
+
 ## 实现结果
 
 - Web 默认回环监听；所有修改状态的 API 经过认证、Origin/CSRF、防滥用和结构化审计。

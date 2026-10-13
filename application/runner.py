@@ -31,7 +31,6 @@ from missions.common.actions.action_lab import action_lab_specs, create_action_l
 from missions.common.actions.runner import ActionRunner
 from application.send_state import SystemSendState
 
-from telemetry_link.command_dispatcher import CommandResult
 from application.yolo_command_client import YoloCommandClient
 from application.state_store import ApplicationStateStore
 from application.result_service import ResultService

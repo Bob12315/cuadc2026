@@ -69,7 +69,7 @@ PA-00～PA-20 → CF-00～CF-28 → PA-21～PA-31
 
 ```text
 Web UI → WebServices facade / typed routers → Action Mission → ActionRuntimeService
-→ ActionRunner → thin Actions → guidance → ActionDispatcher
+→ ActionRunner → Actions（按需调用 guidance）→ ActionDispatcher
 → ActionSafetyPipeline → LinkManager → telemetry_link / MAVLink
 ```
 
@@ -81,5 +81,5 @@ Web UI → WebServices facade / typed routers → Action Mission → ActionRunti
 - 投放只走 `payload_release → set_servo`；
 - 运行产物只进入 `runtime/`。
 
-主线验证命令和测试范围见 `tests/README.md`。历史 Git 计划或未完成目标接口不能替代当前源码、
+主线验证命令和测试范围见 [tests/README.md](../../tests/README.md)。历史 Git 计划或未完成目标接口不能替代当前源码、
 `architecture/` 和已验收契约。

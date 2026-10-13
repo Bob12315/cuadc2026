@@ -176,10 +176,8 @@ class ActionRuntimeService:
     ) -> None:
         """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
 
-        Default path uses atomic stop-and-clear to guarantee the STOP is
-        transmitted before the queue is cleared.  This avoids the race where
-        stop_body_velocity() writes a STOP and the immediate
-        clear_continuous_commands() removes it before CommandSender sends it.
+        The production adapter uses the broker's stop-and-clear barrier,
+        so cancelling continuous commands cannot erase the required zero.
 
         leave_stop_queued=True preserves the old semantics for the
         align_descend → payload_release transition where a persistent STOP
@@ -216,7 +214,7 @@ class ActionRuntimeService:
             elif callable(stop_body):
                 _log.warning(
                     "stop_body_velocity_and_clear unavailable; "
-                    "queue STOP without immediate clear (stop will be sent by CommandSender)"
+                    "request STOP without immediately clearing the adapter's pending stop"
                 )
                 stop_body()
             else:

@@ -1,6 +1,7 @@
 # Action 契约与坐标参数迁移方向
 
-本文描述当前 Action 主线的边界和未来参数方向。Phase 1 不修改运行时 schema。
+本文描述当前 production Action 主线及兼容参数边界；尚未切换的 stable-core 接口见
+[当前架构](current_architecture.md)。
 
 ## Action 边界
 
@@ -14,7 +15,7 @@
 
 ## 推荐坐标参数
 
-FIELD 航点建议迁移为：
+FIELD 航点使用语义化字段：
 
 ```json
 {
@@ -25,12 +26,13 @@ FIELD 航点建议迁移为：
 }
 ```
 
-`goto_waypoint` 只接受 FIELD 输入并只发送 GLOBAL GPS 目标。默认
+`goto_waypoint` 接受 FIELD 输入；定位结果中已解析的 `lat/lon` 也可作为迁移输入，
+仍要求冻结的 Field Reference。它只发送 GLOBAL GPS 目标。默认
 `yaw_mode=field_heading`，以 `field_yaw_deg=0.0` 始终朝向 FIELD +Y（已定义为
 场地中央方向），并转换为飞控北基准实际偏航。`yaw_mode=hold` 仅保留为明确
 指定时的兼容选项：它锁定启动后的首个有效飞行器 yaw，并在每个 GLOBAL GPS
 目标中显式下发该角度。
-不再生成 LOCAL_NED 航点。BODY_NED 速度建议使用
+不再生成 LOCAL_NED 航点。BODY_NED 速度的语义化命名为
 `vx_forward_mps/vy_right_mps/vz_down_mps`。完整符号约定见
 [坐标系规范](../../developer/coordinate_frames.md)。
 
@@ -45,12 +47,13 @@ Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 
 ## 起飞后的固定场地朝向
 
-`takeoff` 在 GUIDED/ARM 确认后先发 `TAKEOFF`，下一次 Action update 立即发送
-绝对 `condition_yaw`，使整个爬升阶段锁定 `FIELD +Y`。默认
+`takeoff` 在 GUIDED/ARM 确认后先发 `TAKEOFF`，保持起飞前的机头方向垂直爬升。
+达到 `altitude_m - altitude_tolerance_m` 高度门槛后，才一次性发送绝对
+`condition_yaw` 转向 `FIELD +Y`。默认
 `takeoff_yaw_deg=null` 会复用已确认的 `field_heading_yaw_rad`；显式
 `takeoff_yaw_deg` 则覆盖该默认值。该 yaw 命令使用 `relative=false`、
-`direction=0` 和默认 20°/s，且起飞完成后不再周期性重发。默认容差为 5°、
-连续 2 个遥测更新、偏航阶段超时为 12 秒。字段朝向尚未确认时，Action 会在
+`direction=0` 和默认 20°/s，且不会周期性重发。默认容差为 5°、
+连续 2 个遥测更新、偏航阶段超时为 12 秒。默认场地朝向模式下，字段朝向尚未确认时，Action 会在
 切换模式或解锁前以 `field_heading_not_ready` 失败；`yaw_mode=hold` 是唯一保留
 原行为的显式兼容选项。
 
@@ -59,16 +62,18 @@ Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 航点阶段的地速切换只能走正式发送链：
 
 ```text
-change_speed Action → ActionDispatcher → LinkManager.change_speed
+change_speed Action → ActionRuntimeService → ActionDispatcher
+→ ActionSafetyPipeline → VehicleCommandPort adapter → LinkManager.change_speed
 → MAV_CMD_DO_CHANGE_SPEED
 ```
 
 `goto_waypoint.max_horizontal_speed_mps` 是到点速度门槛，不是飞行限速。需要限定
 任务阶段地速时，必须显式编排 `change_speed` Action，并在阶段结束或失败恢复路径中
-恢复后续阶段速度。`LinkManager` 会把当前速度目标附加到后续位置航点；发送线程检测到
-Guided 由速度控制切回位置控制时，必须先发送位置目标，再立即重发
-`MAV_CMD_DO_CHANGE_SPEED`，防止飞控位置控制初始化覆盖阶段限速。Action 不得直接调用
-`LinkManager` 或 pymavlink。
+恢复后续阶段速度。底层编码器包含在 Guided 从速度切回位置时先发送位置目标、再重发
+`MAV_CMD_DO_CHANGE_SPEED`，但当前 production v2 adapter 不保留航点的速度覆盖，
+`MavlinkEnvelopeWriter` 重建参数时设置 `_speed_overrides=[]`，因此这项重发不是当前保证。
+阶段速度在控制模式切换后的保持仍须 SITL/实机验证，并作为发送链缺口单独修复；
+不能由编码器的能力推断它已生效。Action 不得直接调用 `LinkManager` 或 pymavlink。
 
 ## 投放契约
 

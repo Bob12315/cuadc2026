@@ -63,7 +63,7 @@ RK3588 IP：
 然后在笔记本终端测试：
 
 ```bash
-ssh <用户名>@<RK3588-IP>
+ssh "<用户名>@<RK3588-IP>"
 ```
 
 看到 RK3588 的命令行就表示成功。到这里以后，绝大多数板端软件配置都可以交给 AI Agent
@@ -107,7 +107,8 @@ AI 必须先阅读 [`docs/ai/guides/DEPLOY_RK3588.md`](../ai/guides/DEPLOY_RK358
 复制给 AI，并替换 SSH 地址：
 
 ```text
-请通过 SSH 帮我部署这台 RK3588 上的 uav_system-rk3588 项目。
+请通过 SSH 帮我部署这台 RK3588 上的 cuadc2026 项目。
+仓库：https://github.com/Bob12315/cuadc2026.git
 
 RK3588 SSH：
 <用户名>@<RK3588-IP>
@@ -143,7 +144,8 @@ AI 完成后，至少确认：
 
 - app 和 YOLO 服务能够稳定运行；
 - RKNNLite 能加载当前 RKNN 模型；
-- Web UI 可以通过 `http://<RK3588-IP>:8080/` 访问；
+- 已通过环境变量或权限受限文件向 app 提供操作者口令；使用 systemd 时也已给用户服务配置该环境变量；
+- 若需要局域网访问，已核对 `web_host`、实际 IP 的 Host/Origin 白名单和可信网段，Web UI 可以通过 `http://<RK3588-IP>:8080/` 访问；
 - YOLO 视频和检测结果可见；
 - MAVLink 能只读显示 heartbeat、GPS 和姿态；
 - Web UI 明确显示 SEND OFF；

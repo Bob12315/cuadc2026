@@ -8,8 +8,8 @@
 | --- | --- |
 | `scripts/install/` | Python 环境和系统依赖安装 |
 | `scripts/deploy/` | systemd 用户服务安装与启用 |
-| `scripts/config/` | RK3588 实机/SITL 配置档案切换与保存 |
-| `scripts/healthcheck/` | RK3588 板卡只读健康检查 |
+| `scripts/config/` | RK3588 实机/SITL 配置差异渲染与切换（自动保存已停用） |
+| `scripts/healthcheck/` | RK3588 板卡环境、设备与 NPU 推理检查 |
 
 ## 顶层脚本
 
@@ -54,6 +54,9 @@ bash scripts/install/install_yolo_env.sh
 
 ## 部署
 
+立即启动前，按[部署指南](../docs/ai/guides/DEPLOY_RK3588.md)向 systemd 用户管理器提供
+Web 操作者凭据；仅在交互终端中 export 不会自动传给用户服务。
+
 ```bash
 bash scripts/deploy/install_systemd_user_services.sh --dry-run
 bash scripts/deploy/install_systemd_user_services.sh
@@ -69,14 +72,16 @@ bash scripts/config/apply_rk3588_real.sh   # 实机配置
 bash scripts/config/apply_rk3588_sitl.sh    # SITL 配置
 ```
 
-调参后保存回档案：
+旧 `save_rk3588_*.sh` 和完整配置复制逻辑已删除。
+调参后先将现场配置快照保存到 `runtime/`：
 
 ```bash
-bash scripts/config/save_rk3588_real.sh
-bash scripts/config/save_rk3588_sitl.sh
+mkdir -p runtime/config-backups
+cp -a config "runtime/config-backups/config-$(date +%Y%m%d-%H%M%S)"
 ```
 
 两个 apply 脚本都要求 `config/app.yaml` 中 `executor.send_commands` 为 `false` 才允许切换。
+审阅现场快照后只把必要差异写入 `profile.yaml`，再用 renderer 检查；自动保存不会完成这一步。
 
 ## 健康检查
 
@@ -84,7 +89,9 @@ bash scripts/config/save_rk3588_sitl.sh
 bash scripts/healthcheck/check_rk3588.sh
 ```
 
-只读检查：NPU、摄像头、MAVLink 连接、conda 环境、磁盘空间等。
+检查 ARM64/RK3588 身份、NPU 设备、环境依赖、摄像头设备及默认 SEND。
+它还会加载 `cuadc-fp16.rknn`、初始化 NPU 并执行空白帧推理，应避开正在进行的视觉任务。
+该脚本不会连接 MAVLink，也不检查磁盘空间。
 
 ## 验证
 

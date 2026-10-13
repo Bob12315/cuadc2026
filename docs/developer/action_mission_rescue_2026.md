@@ -14,8 +14,13 @@
 4. 前往侦察区扫描危险标识并生成排名；
 5. 返回起飞点，执行视觉辅助降落和 LAND 兜底。
 
+以上是比赛目标。当前完整模板已编排侦察区航点飞行，但没有侦察检测采集、融合或危险标识
+排名步骤，不能把飞完侦察航迹视为已经生成排名。起飞前手动按顺序选桶功能已删除，
+当前 `select_drop_targets` 按评分和去重规则自动选择。
+
 FIELD 坐标中 `+Y` 为场地前方、`+X` 为场地右方，`altitude_m` 向上为正。
-投放区和侦察区几何来自当前 Field Profile，不应在运行时代码中另写一套坐标。
+投放区和侦察区边界由当前 Field Profile 定义；正式模板中的具体航点目前显式写在 JSON 中，
+不会随 profile 的扫描航点自动更新。调整场地后必须同时核对模板，不应在运行时代码中另写坐标。
 
 ## 当前完整流程
 
@@ -42,6 +47,10 @@ takeoff
 速度切换必须显式使用 `change_speed` Action。`goto_waypoint` 中的到点速度参数是完成
 判据，不是飞行限速。
 
+完整模板起飞目标为 4.5 m。`takeoff` 先保持原航向垂直爬升，达到
+`altitude_m - altitude_tolerance_m` 门槛后才发送一次绝对 `condition_yaw` 转向 FIELD +Y，
+达到偏航判据后再稳停 1 秒；它不在整个爬升阶段反复下发偏航指令。
+
 ### 侦察区六点航迹
 
 完整 v2 在侦察区的两排各设置左、中、右三个 FIELD 航点，两排分别位于 `Y=56 m` 和 `Y=59 m`，
@@ -50,7 +59,8 @@ takeoff
 `(-3,56) → (0,56) → (3,56) → (3,59) → (0,59) → (-3,59)`。
 
 入口仍为 `(-3,56)`、4 m，到达后降为侦察速度 0.2 m/s。六点到点误差为水平 0.4 m、
-高度 0.3 m，继承 Action 默认的 1 秒稳停，不要求速度门槛。原中心点 `(0,57.5)` 已移除；结束后
+高度 0.3 m，不要求速度门槛，且没有显式稳停（`goto_waypoint.settle_time_s` 默认为 0）。
+只有入口明确设置 1 秒稳停。原中心点 `(0,57.5)` 已移除；结束后
 恢复 2 m/s，返回 `(0,0)`、4 m。此修改仅适用于完整 v2，`recon_gps.json` 分项模板保持原航迹。
 
 ### 展开的 v2 Action 清单与失败策略
@@ -103,8 +113,8 @@ profile、速度、高度、SERVO 输出和失败继续策略。
 `scripts/run_iris_gimbal_sitl.sh` 启动的世界使用
 `iris_cuadc2026_fixed_down_camera`。其相机是固定下视、未镜像的 640 × 480 图像，10 Hz，
 水平 FOV 为 2.0 rad（114.591559°）；按 4:3 图像比例推导的垂直 FOV 为 98.864783°。
-因此两个投放模板中所有需要地面投影的 `gps_capture_view`、`gps_target_lock` 的 `camera`
-参数均为：
+这是 SITL profile 的相机/output 视场角。`drop_two_targets.json` 的地面投影 `camera`
+参数采用这组值：
 
 ```json
 {
@@ -115,8 +125,15 @@ profile、速度、高度、SERVO 输出和失败继续策略。
 }
 ```
 
-`align_descend` 直接使用 YOLO 的归一化 `ex/ey` 生成 BODY_NED 控制量，控制目标是画面中心，
-速度方向使用 `vx_sign=-1`、`vy_sign=1`。
+`rescue_2026_full_auto.json` 的单视角 `gps_capture_view` 当前使用另一组独立投影参数：
+`fov_x_deg=142.964844`、`fov_y_deg=131.870643`、`ground_distance_scale=0.21`，
+图像方向仍为 `image_x_sign=1`、`image_y_sign=-1`。这些参数不从 YOLO profile 自动继承，
+也不能视为实机相机内参；实飞前须按实际图像、安装和高度来源验证。
+两个正式投放模板均未编排 `gps_target_lock`，而是由 `align_descend` 在到达目标附近后自行锁定视觉目标。
+
+`align_descend` 使用 YOLO 的归一化 `ex/ey` 相对 `release_target_ex/ey` 的误差生成
+BODY_NED 控制量。未设置偏移时控制目标为画面中心；完整投放流程的两路 `ey` 偏移分别为
+0.3 和 -0.05。速度方向使用 `vx_sign=-1`、`vy_sign=1`。
 
 Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但自动任务只允许后者：
 
@@ -125,27 +142,32 @@ Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但�
 | bottle1 / `payload_1` | 后方；遥控器 -26（锁）、60（投） | SERVO8 | 1370 → 1800 → 1370 | `/cuadc2026/payload/bottle1/detach` |
 | bottle2 / `payload_2` | 前方；遥控器 -35（锁）、49（投） | SERVO9 | 1335 → 1835 → 1335 | `/cuadc2026/payload/bottle2/detach` |
 
-遥控器位置按 `-100 = 1000`、`100 = 2000` 线性换算为 PWM；它们用于校准记录，绝不是
-Mission 参数。`payload_release` 只经 `set_servo` 发送 `MAV_CMD_DO_SET_SERVO`；
+表中的遥控器位置是历史校准记录，绝不是 Mission 参数。按 `-100 = 1000`、`100 = 2000`
+线性换算，SERVO9 的旧记录 -35/49 对应 1325/1745，不能据此推导当前模板的 1335/1835。
+当前自动任务以模板和安全白名单为准；bridge 的匹配阈值仍须在实际 Gazebo 配置中核对。
+`payload_release` 只经 `set_servo` 发送 `MAV_CMD_DO_SET_SERVO`；
 `config/safety.yaml` 只白名单化 SERVO8 的 1370--1800 与 SERVO9 的 1335--1835 PWM，禁止
 RC override。
 
 ## 侦察、对准、投放原子 Action
 
 每个 Action 的统一返回形状为 `done`、`failed`、`reason`、`output`、`detail` 和 typed
-`actions`；Mission 只将有 `save_as` 的 `output` 放入 blackboard。
+`effects`；序列化状态中的 `actions` 是兼容 request 视图。Mission 只将有 `save_as` 的
+`output` 放入 blackboard。
 
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
 | 投放区中心单视角粗定位 | 飞至 FIELD `(0, 32.5)`、5 m 后运行一次 `gps_capture_view`，从当前广角 YOLO `scene.detections` 与捕获时 GPS/yaw/高度计算每个筒的粗 GPS；随后 `gps_fuse_views` 与 `select_drop_targets` 按筒类别得分和空间去重选择最多两个目标。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
-| 最近目标对准下降 | 飞机先到融合 GPS 点上方 3 m，融合 GPS 只用于导航。`align_descend` 首先从 `scene.detections` 获取画面中心附近的目标，按 track ID 和图像位置连续性跟踪，同时根据投放偏置修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 6 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
+| 最近目标对准下降 | 飞机先到融合 GPS 点上方 3 m，融合 GPS 只用于导航。`align_descend` 首先从 `scene.detections` 获取画面中心附近的目标，按 track ID 和图像位置连续性跟踪，同时根据投放偏置修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度并完成稳停后，最近 6 个计票画面至少 3 帧位于对准范围，且水平速度低于模板门槛，返回 `alignment_confirmed`；提供 `frame_id` 时相邻重复帧不重复计票。投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持 30 s 总超时失败。 |
 | 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放依次控制后方 SERVO8、前方 SERVO9，两路之间间隔 1 s；两个目标时分别控制 SERVO8、SERVO9，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
-连续的 `align_descend` 在停止、超时或丢失视觉时都会发送显式零速，
-并清除旧连续命令；这不能替代飞手或地面站接管。
+投放 `align_descend` 丢失视觉时生成零速等待；停止和超时退出时生成显式零速并清除旧连续命令。
+最终返航段显式启用 `continue_descending_on_target_loss`：首次获取目标后再丢失视觉，会以零水平速度
+继续下降，到最终高度后结束该 Action。若启动后 2 秒仍未首次获取目标，则以
+`target_acquisition_timeout_accepted` 完成并进入 LAND。这些行为不能替代飞手或地面站接管。
 
 完整流程投放对准段的有效参数是：目标高度 1.1 m、下降率 0.2 m/s、相对投放偏置的
-对准范围 `|ex - release_target_ex|/|ey - release_target_ey| ≤ 0.04`；两路投放的 `ey` 偏置
+对准范围为 `|ex - release_target_ex| ≤ 0.04` 且 `|ey - release_target_ey| ≤ 0.04`；两路投放的 `ey` 偏置
 分别为 0.3 和 -0.05。下降阶段水平 P 增益为 0.42，限幅 0.3 m/s；最终高度 P 增益为 0.2，
 限幅 0.15 m/s，稳停 0.3 s，并要求水平速度低于 0.08 m/s。积分校正关闭。
 返航视觉下降段目标高度为 0.3 m，对准范围为 0.3，稳停 0.5 s。
@@ -165,8 +187,12 @@ Action Mission JSON
   → ActionDispatcher
   → ActionSafetyPipeline
   → LinkManager
-  → Flight Controller / YOLO / Servo
+  → telemetry_link / MAVLink → Flight Controller / Servo
 ```
+
+YOLO 感知通过独立 UDP 链路进入 runtime context；视觉锁定请求由 dispatcher 的 YOLO client
+处理，不经 `LinkManager`。新增 Stable Core dispatcher/lease/cycle 链目前只完成离线 readiness，
+不替代上图的实际运行链，边界见 [当前架构](../ai/architecture/current_architecture.md)。
 
 Mission 和 Action 不得直接调用 pymavlink 或 `LinkManager`。飞控请求只允许经由
 `ActionDispatcher` 派发；投放只允许走：
@@ -202,8 +228,9 @@ goto_waypoint（融合目标 GPS 上方）
 槽位，以及导航至目标附近；广角边缘误差由后续近距离视觉对准投放处理。融合输出携带的
 总权重会参与同类别目标的稳定排序。零目标时 `target_slots[0]` 是 FIELD `(0, 32.5)` 的
 中心回退点，飞机在 3 m 高度直接依次投放两枚载荷。一个目标时第一槽使用融合 GPS，
-并在一次对准后依次投放两枚载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定
-track，只使用飞机到达位置后的当前画面；投放计划只控制该步骤是否执行。
+并在一次对准后依次投放两枚载荷；两个目标时两个槽分别执行。`align_descend` 不消费
+Mission 指定的固定 track，只使用飞机到达位置后的当前画面建立并维护本 Action 的 track/图像位置锁定；
+投放计划只控制该步骤是否执行。
 
 参数引用支持字典键和列表索引，例如：
 
@@ -251,7 +278,7 @@ schema v3 是比赛与 SITL 唯一受支持的场地流程。具体契约见
 
 配置或加载 Mission 不发送飞行命令。实发至少需要：
 
-1. `config/app.yaml` 中系统 `executor.send_commands` 已人工开启；
+1. 系统 SEND 已由操作者人工开启（配置默认仍为 `executor.send_commands: false`）；
 2. 当前 Action Mission 已建立绑定目标 source 的本次 run 授权；
 3. telemetry、Field Reference 和相关 Action preflight 条件有效。
 
@@ -286,6 +313,6 @@ validator 不连接飞控，不验证识别精度、坐标标定、飞行安全�
 
 - Mission 刻意保持受限顺序/失败分支模型，不提供通用脚本 DSL。
 - 比赛参数仍需按正式场地、机体、相机和载荷进行现场标定。
-- 危险标识排名依赖当前模型、阈值和观察点覆盖，不能只凭模板校验判定有效。
+- 侦察检测采集、融合和危险标识排名尚未编排进正式模板；后续实现仍需验证模型、阈值和覆盖。
 - Action 连续控制由 P0 Safety Pipeline 统一裁决。
 - 报告结果可供 Web UI 和 blackboard 使用，但最终比赛交付形式仍需按规则确认。

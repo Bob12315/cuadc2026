@@ -1,5 +1,13 @@
 # Phase 2 legacy test retirement
 
+This is the Phase 2 retirement record, not a statement that its future-coverage
+items are still absent. The table below preserves that phase's dispositions.
+The current Action safety implementation and tests are under `execution/` and
+`tests/unit/execution/`; FIELD/GPS contracts and transforms are covered by the
+current Field Reference and frame contract tests. The removed CommandShaper,
+FlightCommandExecutor and CoordinateTransform must not be recreated from this
+historical table.
+
 These tests were removed from the active suite because they imported deleted
 mission/stage/control packages during collection. The production stack was not restored.
 

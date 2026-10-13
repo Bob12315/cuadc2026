@@ -2,10 +2,12 @@
 
 通用 app（Action Mission、遥测、Web UI）支持 Linux x86_64 与 Linux ARM64；它不安装
 RKNNLite 或 OpenCV。app 可以用 `--no-yolo-udp` 运行，此时 Web 状态显示
-`perception_source=disabled`，视觉 Action 会因无效感知而安全失败，非视觉 Action 不受影响。
+`perception_source=disabled`，视觉 Action 没有有效感知输入，按各自的等待/失败/超时策略处理；
+不能据此完成视觉定位或对准验收。非视觉 Action 不依赖 YOLO，但仍须满足各自遥测和安全前置条件。
 
 板端 YOLO 是可选的第二个进程，只支持 Linux ARM64 的 RK3588，使用
-`rknn-toolkit-lite2` 和 `data/models/cuadc-fp16.rknn`。它不提供 x86、CUDA、PyTorch
+`rknn-toolkit-lite2`。根配置当前使用 `data/models/cuadc-fp16.rknn`，`AGENTS.md` 的规范部署
+路径是 `data/models/cuadc2026-fp16.rknn`，二者的未统一状态见 [配置说明](configuration.md)。它不提供 x86、CUDA、PyTorch
 或 GPU 回退路径。
 
 ```bash

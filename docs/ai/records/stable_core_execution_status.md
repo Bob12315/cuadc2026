@@ -5,6 +5,10 @@
 [`stable_core_refactor_plan.md`](../plans/stable_core_refactor_plan.md) 的逐项验收为准；本记录不把 readiness、
 离线单测或用户后续验证承诺冒充 SITL/目标硬件/production cutover 证据。
 
+本文的“本轮/当前”均指 2026-08-16 执行会话；其取消项、设备状态和测试数字
+不构成后续会话的事实或授权。当前 production 路径见
+[当前架构](../architecture/current_architecture.md)。
+
 ## 1. 修改前基线和安全约束
 
 修改前基线见 [`stable_core_baseline.md`](stable_core_baseline.md)。开始修改时正式测试为 `791 passed,

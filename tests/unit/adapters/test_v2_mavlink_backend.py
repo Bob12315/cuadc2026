@@ -14,8 +14,7 @@ from contracts.platform.vehicle_commands import (
 )
 from telemetry_link.ack_router import AckRouter, AckSlot
 from telemetry_link.command_broker import CommandBroker
-from telemetry_link.command_queue import CommandQueue
-from telemetry_link.command_sender import CommandSender
+from telemetry_link.mavlink_command_encoder import MavlinkCommandEncoder
 from telemetry_link.config import DEFAULT_CONFIG_PATH, _build_config
 from telemetry_link.mavlink_command_adapter import MavlinkCommandAdapter, WriteContext
 from telemetry_link.mavlink_encoder import MavlinkEnvelopeWriter
@@ -64,7 +63,7 @@ def _backend():
     cfg = _build_config(cfg_data)
     cache = StateCache(3, 2)
     client = _Client()
-    encoder = CommandSender(client, CommandQueue(), cache, cfg, threading.Event(), propagate_errors=True)
+    encoder = MavlinkCommandEncoder(client, cache, cfg)
     writer = MavlinkEnvelopeWriter(encoder)
     context = WriteContext("run", "lease", 1, 1, True)
     broker = CommandBroker(writer=writer, source=lambda: "sitl", link_session=lambda: "session",
@@ -113,14 +112,6 @@ def test_v2_control_rejects_implicit_frame_conversion_and_types_stop() -> None:
     assert broker._active_motion == set()
 
 
-def test_backend_configuration_is_strict_xor() -> None:
-    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    for legacy, v2 in ((False, False), (True, True)):
-        data["legacy_writer_enabled"] = legacy
-        data["v2_writer_enabled"] = v2
-        with pytest.raises(ValueError, match="exactly one"):
-            _build_config(data)
-
 
 def test_test_only_sitl_composition_constructs_no_real_client(monkeypatch) -> None:
     constructed = []
@@ -133,7 +124,7 @@ def test_test_only_sitl_composition_constructs_no_real_client(monkeypatch) -> No
     assert constructed == ["sitl"] and "real" not in constructed
 
 
-def test_source_switch_clears_both_backends_and_reports_undeliverable_stop(monkeypatch) -> None:
+def test_source_switch_clears_both_sources_and_reports_undeliverable_stop(monkeypatch) -> None:
     monkeypatch.setattr(link_manager_module, "MavlinkClient", lambda _endpoint: _Client())
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
     data.update(data_source="dual", active_source="real")
@@ -155,12 +146,11 @@ def test_source_switch_clears_both_backends_and_reports_undeliverable_stop(monke
     old.submit(motion); old.drain_one(); new.submit(pending)
     manager.runtimes["real"].command_broker = old
     manager.runtimes["sitl"].command_broker = new
-    for runtime in manager.runtimes.values():
-        runtime.command_queue.put_action(ActionCommand(ActionType.LAND, created_at=time.time()))
     receipt = manager.activate_source("sitl", expected_revision=0)
     assert receipt.accepted and receipt.barrier_disposition == "STOP_UNDELIVERABLE"
     assert new.status("pending").queue_state.value == "CANCELLED"
-    assert all(runtime.command_queue.get_next_action() is None for runtime in manager.runtimes.values())
+    assert old._active_motion == set()
+    assert len(old_writer) == 1  # no disconnected stop was falsely reported as delivered
 
 
 def test_early_ack_is_published_after_transmitted_event() -> None:
@@ -185,23 +175,25 @@ def test_early_ack_is_published_after_transmitted_event() -> None:
     assert names.index("TRANSMITTED") < names.index("ACKED")
 
 
-@pytest.mark.parametrize("legacy,v2", [(False, True), (True, False)])
-def test_runtime_rehearsal_has_exactly_one_backend_owner(legacy, v2) -> None:
+def test_runtime_rehearsal_has_only_the_broker_worker() -> None:
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    data.update(legacy_writer_enabled=legacy, v2_writer_enabled=v2,
-                request_message_intervals=False, data_source="sitl", active_source="sitl")
+    data.update(request_message_intervals=False, attitude_udp_enabled=False,
+                data_source="sitl", active_source="sitl")
     cfg = _build_config(data)
-    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(3, 2), CommandQueue(),
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(3, 2),
                             _Client(), threading.Event(), threading.Event())
     runtime._connect_and_start_workers(logging.getLogger("backend-rehearsal"))
+    worker = runtime.broker_worker
     try:
-        assert (runtime.broker_worker is not None) is v2
-        assert runtime.sender is not None
-        assert runtime.sender.is_alive() is legacy
+        assert worker is not None
+        assert runtime.encoder is not None
+        assert not isinstance(runtime.encoder, threading.Thread)
+        assert not hasattr(runtime, "sender")
+        assert not hasattr(runtime, "command_queue")
     finally:
         runtime.stop()
     assert runtime.broker_worker is None
-    assert runtime.sender is None
+    assert runtime.encoder is None
 
 
 @pytest.mark.parametrize("acknowledge", [True, False])
@@ -211,7 +203,7 @@ def test_bootstrap_stream_requests_wait_for_ack_quarantine(acknowledge) -> None:
                 message_interval_hz={"HEARTBEAT": 1, "SYS_STATUS": 2})
     cfg = _build_config(data)
     cache = StateCache(3, 2)
-    runtime = SourceRuntime("real", cfg.real, cfg, cache, CommandQueue(),
+    runtime = SourceRuntime("real", cfg.real, cfg, cache,
                             _Client(), threading.Event(), threading.Event())
     router = AckRouter(lambda *a, **kw: None, quarantine_ns=40_000_000)
     runtime.ack_router = router
@@ -226,8 +218,8 @@ def test_bootstrap_stream_requests_wait_for_ack_quarantine(acknowledge) -> None:
                 source_system=1, source_component=1, result=0,
             )
 
-    runtime.sender = SimpleNamespace(_send_action=send)
-    runtime._request_default_message_intervals(direct=True)
+    runtime.encoder = SimpleNamespace(_send_action=send)
+    runtime._request_default_message_intervals()
     assert [name for name, _ in sent] == ["HEARTBEAT", "SYS_STATUS"]
     assert sent[1][1] - sent[0][1] >= 0.04
     assert not router.observe(
@@ -242,7 +234,7 @@ def test_stop_interrupts_bootstrap_stream_requests() -> None:
     data.update(attitude_udp_enabled=True,
                 message_interval_hz={"HEARTBEAT": 1, "SYS_STATUS": 2})
     cfg = _build_config(data)
-    runtime = SourceRuntime("real", cfg.real, cfg, StateCache(3, 2), CommandQueue(),
+    runtime = SourceRuntime("real", cfg.real, cfg, StateCache(3, 2),
                             _Client(), threading.Event(), threading.Event())
     runtime.ack_router = AckRouter(lambda *a, **kw: None)
     sent = []
@@ -251,6 +243,52 @@ def test_stop_interrupts_bootstrap_stream_requests() -> None:
         sent.append(command.params["message_name"])
         runtime.stop_event.set()
 
-    runtime.sender = SimpleNamespace(_send_action=send)
-    runtime._request_default_message_intervals(direct=True)
+    runtime.encoder = SimpleNamespace(_send_action=send)
+    runtime._request_default_message_intervals()
     assert sent == ["HEARTBEAT"]
+
+
+def test_failed_bootstrap_stops_receiver_and_discards_unstarted_writer(monkeypatch) -> None:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data.update(request_message_intervals=True, attitude_udp_enabled=False)
+    cfg = _build_config(data)
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(3, 2),
+                            _Client(), threading.Event(), threading.Event())
+    failed_receivers = []
+
+    def fail_bootstrap(self):
+        failed_receivers.append(self.receiver)
+        self.stop_event.set()
+        raise OSError("bootstrap write failed")
+
+    monkeypatch.setattr(SourceRuntime, "_request_default_message_intervals", fail_bootstrap)
+    runtime._connect_and_start_workers(logging.getLogger("failed-bootstrap"))
+    try:
+        assert runtime.receiver is None
+        assert runtime.command_adapter is None
+        assert runtime.command_broker is None
+        assert runtime.broker_worker is None
+        assert runtime.encoder is None
+        assert not runtime.state_cache.get_link_status().connected
+        assert len(failed_receivers) == 1
+        assert not failed_receivers[0].is_alive()
+    finally:
+        # Test cleanup also works before the production lifecycle fix exists.
+        runtime.worker_stop_event.set()
+        for receiver in failed_receivers:
+            receiver.join(timeout=1)
+
+
+def test_shutdown_before_writer_start_is_safe() -> None:
+    from telemetry_link.command_broker import CommandBrokerWorker
+
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    cfg = _build_config(data)
+    runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(3, 2),
+                            _Client(), threading.Event(), threading.Event())
+    _, broker, _ = _backend()
+    runtime.command_broker = broker
+    runtime.broker_worker = CommandBrokerWorker(broker)
+    runtime.stop()
+    assert runtime.broker_worker is None
+    assert runtime.command_broker is None

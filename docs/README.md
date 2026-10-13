@@ -1,7 +1,8 @@
 # 文档索引
 
-`docs/` 只按读者分为三个一级目录：新手、开发者和 AI。历史设计计划、重构快照和旧
-mission/stage/terminal UI 文档通过 Git 历史追溯，不再与当前教程混放。
+`docs/` 的阅读入口按新手、开发者和 AI 分为三个目录；`assets/` 保存配套素材。
+历史设计计划和重构快照分别保留在 `ai/plans/`、`ai/records/`，并标明历史适用范围。
+旧 mission/stage/terminal UI 的删除版本可通过 Git 历史追溯。
 
 ## 新手
 

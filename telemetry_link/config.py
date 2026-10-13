@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +9,11 @@ import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "telemetry.yaml"
+RETIRED_CONFIG_FIELDS = frozenset({
+    "legacy_writer_enabled", "v2_writer_enabled", "ui_enabled",
+    "state_udp_enabled", "state_udp_ip", "state_udp_port",
+    "control_send_rate_hz", "action_cmd_retries", "action_retry_interval_sec",
+})
 
 
 @dataclass(slots=True)
@@ -34,9 +38,6 @@ class TelemetryConfig:
     active_source: str
     sitl: EndpointConfig
     real: EndpointConfig
-    control_send_rate_hz: float
-    action_cmd_retries: int
-    action_retry_interval_sec: float
     heartbeat_timeout_sec: float
     rx_timeout_sec: float
     reconnect_interval_sec: float
@@ -49,31 +50,12 @@ class TelemetryConfig:
     gimbal_yaw_max_deg: float
     gimbal_pitch_min_deg: float
     gimbal_pitch_max_deg: float
-    state_udp_enabled: bool
-    state_udp_ip: str
-    state_udp_port: int
-    ui_enabled: bool
     log_level: str
-    legacy_writer_enabled: bool = False
-    v2_writer_enabled: bool = True
     ack_quarantine_ms: int = 250
     attitude_udp_enabled: bool = False
     attitude_udp_ip: str = "127.0.0.1"
     attitude_udp_port: int = 5011
     attitude_udp_rate_hz: float = 30.0
-
-
-def _to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if not isinstance(value, str):
-        raise argparse.ArgumentTypeError(f"invalid bool value: {value}")
-    lowered = value.lower()
-    if lowered in {"1", "true", "yes", "y", "on"}:
-        return True
-    if lowered in {"0", "false", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError(f"invalid bool value: {value}")
 
 
 def _require_yaml_bool(value: Any, key: str) -> bool:
@@ -82,67 +64,14 @@ def _require_yaml_bool(value: Any, key: str) -> bool:
     raise ValueError(f"{key} must be a YAML bool: use true or false without quotes")
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Standalone MAVLink telemetry link service")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
-    parser.add_argument("--data-source", choices=["real", "sitl", "dual"])
-    parser.add_argument("--active-source", choices=["real", "sitl"])
-
-    parser.add_argument("--real-connection-type", choices=["serial", "udp", "tcp", "eth"])
-    parser.add_argument("--real-serial-port")
-    parser.add_argument("--real-baudrate", type=int)
-    parser.add_argument("--real-udp-mode", choices=["udpin", "udpout"])
-    parser.add_argument("--real-udp-host")
-    parser.add_argument("--real-udp-port", type=int)
-    parser.add_argument("--real-tcp-host")
-    parser.add_argument("--real-tcp-port", type=int)
-    parser.add_argument("--real-eth-mode", choices=["udpin", "udpout", "tcp"])
-    parser.add_argument("--real-eth-host")
-    parser.add_argument("--real-eth-port", type=int)
-
-    parser.add_argument("--sitl-connection-type", choices=["serial", "udp", "tcp", "eth"])
-    parser.add_argument("--sitl-serial-port")
-    parser.add_argument("--sitl-baudrate", type=int)
-    parser.add_argument("--sitl-udp-mode", choices=["udpin", "udpout"])
-    parser.add_argument("--sitl-udp-host")
-    parser.add_argument("--sitl-udp-port", type=int)
-    parser.add_argument("--sitl-tcp-host")
-    parser.add_argument("--sitl-tcp-port", type=int)
-    parser.add_argument("--sitl-eth-mode", choices=["udpin", "udpout", "tcp"])
-    parser.add_argument("--sitl-eth-host")
-    parser.add_argument("--sitl-eth-port", type=int)
-
-    parser.add_argument("--control-send-rate-hz", type=float)
-    parser.add_argument("--action-cmd-retries", type=int)
-    parser.add_argument("--action-retry-interval-sec", type=float)
-    parser.add_argument("--heartbeat-timeout-sec", type=float)
-    parser.add_argument("--rx-timeout-sec", type=float)
-    parser.add_argument("--reconnect-interval-sec", type=float)
-    parser.add_argument("--receiver-idle-sleep-sec", type=float)
-    parser.add_argument("--sender-idle-sleep-sec", type=float)
-    parser.add_argument("--request-message-intervals", type=_to_bool)
-    parser.add_argument("--gimbal-mount-mode", type=int)
-    parser.add_argument("--gimbal-yaw-min-deg", type=float)
-    parser.add_argument("--gimbal-yaw-max-deg", type=float)
-    parser.add_argument("--gimbal-pitch-min-deg", type=float)
-    parser.add_argument("--gimbal-pitch-max-deg", type=float)
-    parser.add_argument("--state-udp-enabled", type=_to_bool)
-    parser.add_argument("--state-udp-ip")
-    parser.add_argument("--state-udp-port", type=int)
-    parser.add_argument("--attitude-udp-enabled", type=_to_bool)
-    parser.add_argument("--attitude-udp-ip")
-    parser.add_argument("--attitude-udp-port", type=int)
-    parser.add_argument("--attitude-udp-rate-hz", type=float)
-    parser.add_argument("--ui", dest="ui_enabled", action="store_true", default=None)
-    parser.add_argument("--log-level")
-    return parser
-
-
 def _load_yaml(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
         raise ValueError("config yaml must be a mapping")
+    retired = RETIRED_CONFIG_FIELDS.intersection(data)
+    if retired:
+        raise ValueError(f"retired telemetry config field(s): {', '.join(sorted(retired))}")
     allowed = set(TelemetryConfig.__dataclass_fields__) - {"sitl", "real"} | {"sitl", "real"}
     unknown = set(data) - allowed
     if unknown:
@@ -156,20 +85,6 @@ def _load_yaml(path: str) -> dict[str, Any]:
         if nested_unknown:
             raise ValueError(f"unknown {name} field(s): {', '.join(sorted(nested_unknown))}")
     return data
-
-
-def _merge_cli_overrides(merged: dict[str, Any], args: argparse.Namespace) -> None:
-    for key, value in vars(args).items():
-        if key == "config" or value is None:
-            continue
-        if key.startswith("real_"):
-            merged.setdefault("real", {})
-            merged["real"][key.removeprefix("real_")] = value
-        elif key.startswith("sitl_"):
-            merged.setdefault("sitl", {})
-            merged["sitl"][key.removeprefix("sitl_")] = value
-        else:
-            merged[key.replace("-", "_")] = value
 
 
 def _build_endpoint(name: str, data: dict[str, Any]) -> EndpointConfig:
@@ -190,10 +105,9 @@ def _build_endpoint(name: str, data: dict[str, Any]) -> EndpointConfig:
 
 
 def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
-    legacy_writer_enabled = _require_yaml_bool(merged.get("legacy_writer_enabled", False), "legacy_writer_enabled")
-    v2_writer_enabled = _require_yaml_bool(merged.get("v2_writer_enabled", True), "v2_writer_enabled")
-    if legacy_writer_enabled == v2_writer_enabled:
-        raise ValueError("exactly one of legacy_writer_enabled/v2_writer_enabled must be true")
+    retired = RETIRED_CONFIG_FIELDS.intersection(merged)
+    if retired:
+        raise ValueError(f"retired telemetry config field(s): {', '.join(sorted(retired))}")
     attitude_udp_ip = str(merged.get("attitude_udp_ip", "127.0.0.1"))
     if attitude_udp_ip not in {"127.0.0.1", "localhost"}:
         raise ValueError("attitude_udp_ip must be localhost-only")
@@ -213,9 +127,6 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
         active_source=str(merged["active_source"]),
         sitl=_build_endpoint("sitl", dict(merged["sitl"])),
         real=_build_endpoint("real", dict(merged["real"])),
-        control_send_rate_hz=float(merged["control_send_rate_hz"]),
-        action_cmd_retries=int(merged["action_cmd_retries"]),
-        action_retry_interval_sec=float(merged["action_retry_interval_sec"]),
         heartbeat_timeout_sec=float(merged["heartbeat_timeout_sec"]),
         rx_timeout_sec=float(merged["rx_timeout_sec"]),
         reconnect_interval_sec=float(merged["reconnect_interval_sec"]),
@@ -228,13 +139,7 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
         gimbal_yaw_max_deg=float(merged.get("gimbal_yaw_max_deg", 180.0)),
         gimbal_pitch_min_deg=float(merged.get("gimbal_pitch_min_deg", -180.0)),
         gimbal_pitch_max_deg=float(merged.get("gimbal_pitch_max_deg", 180.0)),
-        state_udp_enabled=_require_yaml_bool(merged.get("state_udp_enabled", True), "state_udp_enabled"),
-        state_udp_ip=str(merged.get("state_udp_ip", "127.0.0.1")),
-        state_udp_port=int(merged.get("state_udp_port", 5010)),
-        ui_enabled=_require_yaml_bool(merged.get("ui_enabled", False), "ui_enabled"),
         log_level=str(merged["log_level"]),
-        legacy_writer_enabled=legacy_writer_enabled,
-        v2_writer_enabled=v2_writer_enabled,
         ack_quarantine_ms=max(0, int(merged.get("ack_quarantine_ms", 250))),
         attitude_udp_enabled=attitude_udp_enabled,
         attitude_udp_ip=attitude_udp_ip,
@@ -247,9 +152,3 @@ def load_config_file(path: str | Path) -> TelemetryConfig:
     return _build_config(_load_yaml(str(path)))
 
 
-def load_config() -> TelemetryConfig:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    merged = _load_yaml(args.config)
-    _merge_cli_overrides(merged, args)
-    return _build_config(merged)

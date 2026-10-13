@@ -1094,7 +1094,7 @@ class FieldTransform:
 
 纯函数接口保持普通函数，不包装成 I/O Port：
 
-```python
+```text
 field_to_geo(point: FieldPoint, transform: FieldTransform) -> GeoPoint
 geo_to_field(point: GeoPoint, transform: FieldTransform) -> FieldPoint
 ```
@@ -1475,7 +1475,7 @@ flowchart LR
 | 当前/指定 run | `GET /api/v1/runs/current`、`GET /api/v1/runs/{run_id}` | `RunQueryPort` | 合并旧 status |
 | stop/reset | `POST /api/v1/runs/{run_id}/stop`、`POST /api/v1/runs/{run_id}/reset` | `RunCommandPort` | 重复到达目标状态返回 `unchanged` |
 | Mission skip | `POST /api/v1/runs/{run_id}/skip` | `RunCommandPort.skip_step` | 替代 `/skip-current`；必须带 StepExecutionToken/idempotency |
-| 手动步进 | `POST /api/v1/manual-moves` | `RunCommandPort.start` | 将 `/api/manual-step-move` 解析为受授权的 `manual_step` `StartActionRunRequestDto` |
+| 手动步进（待重新确认的设计） | `POST /api/v1/manual-moves`（未落地） | `RunCommandPort.start` | 旧 `/api/manual-step-move` 与 `manual_step` 已退役；不得据此自动恢复。后续如批准新功能，必须通过受授权的 Action Run |
 | telemetry reconnect | `POST /api/v1/operations/telemetry-reconnect` | `SystemCommandPort.reconnect_telemetry` | `/api/services/telemetry/reconnect`；返回 202 operation |
 | service restart | `POST /api/v1/operations/service-restarts` | `SystemCommandPort.restart_service` | `/api/services/{service}/restart`；service ID whitelist |
 | operation status | `GET /api/v1/operations/{owner}/{operation_id}` | `SystemQueryPort.operation` | owner 显式为 core-control/platform-admin，查询异步真实状态 |

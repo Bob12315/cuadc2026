@@ -23,10 +23,11 @@
 7. 未经用户明确要求，不提交、不推送、不启动真实硬件服务；
 8. 每次只修改任务范围内的代码、测试和必要文档。
 
-当前工作区在本文创建前已经完成第一轮 `app/` 死代码清理但尚未提交，包括删除
+本文创建时的工作区已经完成第一轮 `app/` 死代码清理但尚未提交，包括删除
 `app/health_monitor.py`、`app/ui_commands.py` 和若干无调用包装器。后续会话不得还原这些
 文件。该清理已通过 `1525 passed, 1 skipped`、架构校验、Action Mission 校验和 P2 Field
-Reference 校验。
+Reference 校验。以上为历史基线；后续任务的已有修改和测试结果必须重新检查，
+不能把当时的未提交状态、测试数或已经退役的中间接口视为当前事实。
 
 ## 1. 永久架构和安全约束
 
@@ -444,7 +445,7 @@ SSH target: pi@192.168.5.33
 
   验收：
 
-  - 旧 `application/runner.py` 删除；
+  - 旧 `app/system_runner.py` 删除，主循环由 `application/runner.py` 持有；
   - `app/` 目标不超过约 5 个 Python 文件；
   - 任一 app 文件不包含控制公式、Mission 状态机或 pymavlink；
   - `python -m app.main --help` 和 1 秒 no-UI/no-telemetry smoke test 通过。

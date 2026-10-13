@@ -2,6 +2,11 @@
 
 日期：2026-08-12
 
+本文记录当日安全决策和参数来源，不是当前参数副本。当前安全边界见
+[安全文档](../../developer/safety.md)，实际包线和 SERVO/PWM 白名单以
+[`config/safety.yaml`](../../../config/safety.yaml) 及正式任务模板为准；
+下列 SERVO 数值属于历史记录，不应用于现场配置。
+
 ## Web 控制面
 
 - 使用局域网单操作者模型，固定角色为 `operator`；P0 不引入 observer/admin 多角色系统。

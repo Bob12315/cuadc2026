@@ -79,13 +79,6 @@ real:
 # -----------------------------------------------------------------------------
 # 命令发送与链路超时
 # -----------------------------------------------------------------------------
-# 连续控制命令最大发送频率，单位：Hz。
-control_send_rate_hz: 10
-
-# 一次性动作命令的默认重试次数与重试间隔，间隔单位：秒。
-action_cmd_retries: 3
-action_retry_interval_sec: 0.5
-
 # 超过 heartbeat_timeout_sec 未收到心跳，则认为链路中断。
 # 超过 rx_timeout_sec 未收到任何消息，则认为链路异常。
 heartbeat_timeout_sec: 10.0
@@ -96,10 +89,7 @@ reconnect_interval_sec: 2.0
 receiver_idle_sleep_sec: 0.01
 sender_idle_sleep_sec: 0.01
 
-# Exactly one command writer backend must be enabled. The v2 broker owns all
-# one-shot and continuous production writes; legacy remains an offline rollback option.
-legacy_writer_enabled: false
-v2_writer_enabled: true
+# CommandBroker is the only command writer; no selectable alternate backend.
 ack_quarantine_ms: 250
 
 # -----------------------------------------------------------------------------
@@ -136,13 +126,8 @@ gimbal_pitch_min_deg: -180.0
 gimbal_pitch_max_deg: 180.0
 
 # -----------------------------------------------------------------------------
-# telemetry 独立运行辅助功能
+# 当前 active source 的本地姿态流
 # -----------------------------------------------------------------------------
-# true：通过本地 UDP 发布最新 drone / gimbal / link 状态。
-state_udp_enabled: true
-state_udp_ip: "127.0.0.1"
-state_udp_port: 5010
-
 # Virtual Nadir V1 的只读姿态基础流默认就绪。仅发布当前 active source 的
 # MAVLink ATTITUDE 到本机 YOLO；是否使用增稳画面只由 yolo.yaml 中的
 # virtual_nadir.enabled 决定，不生成或发送飞行控制命令。
@@ -151,10 +136,6 @@ attitude_udp_ip: "127.0.0.1"
 attitude_udp_port: 5011
 # Virtual Nadir 启用时无论 request_message_intervals 总开关如何，都会显式请求此频率。
 attitude_udp_rate_hz: 80
-
-# true：telemetry 独立运行时默认启用 curses 终端 UI。
-# app 总控进程使用 config/app.yaml 中的 ui 配置。
-ui_enabled: false
 
 # 可选值：DEBUG / INFO / WARNING / ERROR。
 log_level: INFO

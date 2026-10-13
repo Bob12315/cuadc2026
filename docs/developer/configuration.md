@@ -9,6 +9,8 @@
 | `config/app.yaml` | app 生命周期、服务、Web UI、blackbox 和系统 SEND 默认值 |
 | `config/telemetry.yaml` | MAVLink 数据源、端点、频率、超时和发送参数 |
 | `config/yolo.yaml` | RKNN 模型、视频源、UDP、显示和录像 |
+| `config/safety.yaml` | Action 安全包线、TTL、连续命令 watchdog 和 payload SERVO 白名单 |
+| `config/field_profiles/competition_runtime.json` | schema v3 场地几何与运行时 GPS 采样要求 |
 | `config/action_missions/*.json` | 当前 Action Mission 模板 |
 | `config/profiles/rk3588-real/` | 实机 profile |
 | `config/profiles/rk3588-sitl/` | SITL profile |
@@ -29,7 +31,7 @@ executor:
 ```
 
 - Web UI 是正式操作入口。
-- terminal/curses UI deprecated；`config/app.yaml` 不再提供正式 terminal 开关。
+- terminal/curses UI 已删除；`config/app.yaml` 不再提供正式 terminal 开关。
 - `send_commands` 默认必须为 false；连接 telemetry 不等于允许实发。
 - `mission.name: action_lab_only` 是旧 mission 配置表面的兼容标识；当前比赛任务不从
   这里选择，而是由 Web UI 加载 `config/action_missions/*.json`。
@@ -54,7 +56,7 @@ python scripts/validate_action_missions.py
 
 ## yolo.yaml
 
-当前部署模型是：
+根配置当前实际指向的模型是：
 
 ```text
 data/models/cuadc-fp16.rknn
@@ -69,6 +71,11 @@ model_path: "../data/models/cuadc-fp16.rknn"
 根 `config/yolo.yaml` 和实机 profile 使用 `cuadc-fp16.rknn`；SITL profile 使用
 `gazebo_dataset-fp16.rknn`。
 
+这与 `AGENTS.md` 的规范部署模型 `data/models/cuadc2026-fp16.rknn` 尚不一致。
+安装脚本 `install_yolo_env.sh` 检查规范文件，`check_rk3588.sh` 加载实际配置同名的
+`cuadc-fp16.rknn`；二者不能仅凭名称视为同一模型。本文记录该差异，不自动更换模型或配置。
+统一前需核对模型文件、类别顺序、部署来源和实物检测结果。
+
 RK3588/RKNN 可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新量化、校准并
 验证检测正常，否则不得切回 INT8 默认部署。
 
@@ -79,8 +86,8 @@ bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
 ```
 
-profile 只保存相对根配置的差异，不复制整套配置或 Mission。`save_rk3588_*.sh`
-已禁用自动快照；调整时直接审核 `profile.yaml`。切换脚本只写配置，不重启服务。
+profile 只保存相对根配置的差异，不复制整套配置或 Mission。旧 `save_rk3588_*.sh`
+已删除；调整时直接审核 `profile.yaml`。切换脚本只写配置，不重启服务。
 当前 SITL profile 保留 Gazebo FP16 模型、UDP 5600 视频和 Virtual Nadir 开关；
 real profile 显式恢复真实数据源、USB by-id 路径、实机 FP16 模型及实机近似视场角；
 按用户要求启用 Virtual Nadir。两套 profile 分别恢复自己的相机和输出视场角。
@@ -124,6 +131,9 @@ Web UI 可以预览、保存和恢复允许的配置文件。应用/重连/重�
 后也不得自动重新开启。配置中的 bool 必须使用 YAML 原生 `true/false`，不能使用
 字符串。
 
+## 2026-09-07 参数补充与后续现场记录
+
+以下继续记录当日配置和测试结果，供追溯；不能替代当前配置核对或实飞验收。
 
 用户补充参数后（同日）：镜头为 2.8 mm，85° 为对角视场角，要求虚拟云台。
 根配置及 real profile 已启用 Virtual Nadir，camera/output 水平视场角 `72.487673°`、

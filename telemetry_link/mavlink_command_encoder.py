@@ -2,48 +2,35 @@ from __future__ import annotations
 
 import logging
 import math
-import threading
 import time
 
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega
 
 try:
-    from .command_queue import CommandQueue
     from .config import TelemetryConfig
     from .mavlink_client import MavlinkClient
     from .models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
-    from .rate_controller import RateController
     from .state_cache import StateCache
 except ImportError:  # pragma: no cover - supports direct script execution
-    from command_queue import CommandQueue
     from config import TelemetryConfig
     from mavlink_client import MavlinkClient
     from models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
-    from rate_controller import RateController
     from state_cache import StateCache
 
 
-class CommandSender(threading.Thread):
+class MavlinkCommandEncoder:
+    """Synchronous wire encoding; CommandBrokerWorker owns command scheduling."""
     def __init__(
         self,
         client: MavlinkClient,
-        command_queue: CommandQueue,
         state_cache: StateCache,
         cfg: TelemetryConfig,
-        stop_event: threading.Event,
-        propagate_errors: bool = False,
     ) -> None:
-        super().__init__(name="CommandSender", daemon=True)
         self.client = client
-        self.command_queue = command_queue
         self.state_cache = state_cache
         self.cfg = cfg
-        self.stop_event = stop_event
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.propagate_errors = propagate_errors
-        self.control_rate = RateController(cfg.control_send_rate_hz)
-        self._last_guided_setpoint_kind: str | None = None
 
     def _clamp_gimbal_yaw_deg(self, yaw_deg: float) -> float:
         lower = min(float(self.cfg.gimbal_yaw_min_deg), float(self.cfg.gimbal_yaw_max_deg))
@@ -55,46 +42,6 @@ class CommandSender(threading.Thread):
         upper = max(float(self.cfg.gimbal_pitch_min_deg), float(self.cfg.gimbal_pitch_max_deg))
         return max(lower, min(upper, float(pitch_deg)))
 
-    def run(self) -> None:
-        warned_disconnected = False
-        while not self.stop_event.is_set():
-            did_work = False
-            link = self.state_cache.get_link_status()
-
-            if not link.connected:
-                if self.command_queue.peek_control() is not None:
-                    self.command_queue.clear_control()
-                if self.command_queue.peek_gimbal_rate() is not None:
-                    self.command_queue.clear_gimbal_rate()
-                if not warned_disconnected:
-                    self.logger.warning("Stop sending control commands because link is disconnected")
-                    warned_disconnected = True
-                action = self.command_queue.get_next_action()
-                if action is not None:
-                    self.logger.warning("Drop action command %s because link is disconnected", action.action_type)
-                time.sleep(self.cfg.sender_idle_sleep_sec)
-                continue
-
-            warned_disconnected = False
-
-            action = self.command_queue.get_next_action()
-            if action is not None:
-                did_work = True
-                self._send_action(action)
-
-            ready_for_control = self.control_rate.ready()
-            control = self.command_queue.peek_control()
-            if control is not None and ready_for_control:
-                did_work = True
-                self._send_control(control)
-            gimbal_rate = self.command_queue.peek_gimbal_rate()
-            if gimbal_rate is not None and ready_for_control:
-                did_work = True
-                self._send_gimbal_rate(gimbal_rate)
-
-            if not did_work:
-                time.sleep(self.cfg.sender_idle_sleep_sec)
-
     def _send_control(self, command: ControlCommand) -> None:
         try:
             if command.command_type == ControlType.VELOCITY:
@@ -105,35 +52,14 @@ class CommandSender(threading.Thread):
                 self.client.send_raw_message(lambda master: self._send_velocity(master, command))
             else:
                 return
-            self._last_guided_setpoint_kind = "velocity"
             self.state_cache.update_link(last_tx_time=time.time())
-            # Atomic stop-and-clear: after successfully sending a STOP
-            # that requested clear_after_send, clear the queue entry
-            # only if it hasn't been replaced by a newer command.
-            if getattr(command, "clear_after_send", False):
-                self.command_queue.clear_control_if_same(command)
         except Exception as exc:
             self.logger.warning("failed to send control command: %s", exc)
-            if self.propagate_errors:
-                raise
+            raise
 
     def _send_action(self, command: ActionCommand) -> None:
         try:
-            if command.action_type == ActionType.STOP_BODY_VELOCITY:
-                self.logger.info("sending safety barrier=stop_body_velocity")
-                stop = ControlCommand(
-                    command_type=ControlType.STOP,
-                    vx=0.0,
-                    vy=0.0,
-                    vz=0.0,
-                    yaw_rate=0.0,
-                    timestamp=time.time(),
-                    frame=int(command.params.get("frame", 8)),
-                )
-                self.client.send_raw_message(lambda master: self._send_velocity(master, stop))
-                self.command_queue.clear_control()
-                self._last_guided_setpoint_kind = "velocity"
-            elif command.action_type == ActionType.ARM:
+            if command.action_type == ActionType.ARM:
                 self.logger.info("sending action command=arm")
                 self.client.send_raw_message(
                     lambda master: self._command_long(
@@ -265,11 +191,7 @@ class CommandSender(threading.Thread):
                     "ignore" if goto_yaw is None else f"{float(goto_yaw):.3f}",
                 )
                 self.client.send_raw_message(
-                    lambda master: self._send_position_with_speed_reapply(
-                        master,
-                        command,
-                        self._send_global_goto,
-                    )
+                    lambda master: self._send_global_goto(master, command)
                 )
             elif command.action_type == ActionType.LOCAL_POSITION:
                 yaw = command.params.get("yaw")
@@ -282,11 +204,7 @@ class CommandSender(threading.Thread):
                     "ignore" if yaw is None else f"{float(yaw):.3f}",
                 )
                 self.client.send_raw_message(
-                    lambda master: self._send_position_with_speed_reapply(
-                        master,
-                        command,
-                        self._send_local_position,
-                    )
+                    lambda master: self._send_local_position(master, command)
                 )
             elif command.action_type == ActionType.REPOSITION:
                 self.logger.info(
@@ -334,9 +252,6 @@ class CommandSender(threading.Thread):
                     bool(command.params["state"]),
                 )
                 self.client.send_raw_message(lambda master: self._send_set_relay(master, command))
-            elif command.action_type == ActionType.RELEASE_PAYLOAD:
-                payload_id = int(command.params["payload_id"])
-                raise ValueError(f"payload release mapping is not configured: payload_id={payload_id}")
             elif command.action_type == ActionType.GIMBAL_ANGLE:
                 self.logger.info(
                     "sending action command=gimbal_angle pitch=%.2f yaw=%.2f roll=%.2f mount_mode=%s",
@@ -361,22 +276,10 @@ class CommandSender(threading.Thread):
                 )
             else:
                 return
-            if command.action_type in {
-                ActionType.SET_MODE,
-                ActionType.TAKEOFF,
-                ActionType.LAND,
-                ActionType.REPOSITION,
-            }:
-                self._last_guided_setpoint_kind = None
             self.state_cache.update_link(last_tx_time=time.time())
         except Exception as exc:
             self.logger.warning("failed to send action command %s: %s", command.action_type, exc)
-            if self.propagate_errors:
-                raise
-            if command.retries_left > 0:
-                command.retries_left -= 1
-                time.sleep(command.retry_interval_sec)
-                self.command_queue.requeue_action(command)
+            raise
 
     def _send_gimbal_rate(self, command: GimbalRateCommand) -> None:
         try:
@@ -401,8 +304,7 @@ class CommandSender(threading.Thread):
             self.state_cache.update_link(last_tx_time=time.time())
         except Exception as exc:
             self.logger.warning("failed to send gimbal rate command: %s", exc)
-            if self.propagate_errors:
-                raise
+            raise
 
     def _send_velocity(self, master, command: ControlCommand) -> None:
         if command.yaw is not None and command.yaw_rate is not None:
@@ -519,31 +421,6 @@ class CommandSender(threading.Thread):
             0.0 if yaw is None else float(yaw),
             0.0,
         )
-
-    def _send_position_with_speed_reapply(
-        self,
-        master,
-        command: ActionCommand,
-        position_sender,
-    ) -> None:
-        """Send position first, then restore speed after a Guided submode switch."""
-        position_sender(master, command)
-        if self._last_guided_setpoint_kind != "position":
-            for override in command.params.get("_speed_overrides", []):
-                speed_mps = float(override["speed_mps"])
-                speed_type = int(override["speed_type"])
-                self.logger.info(
-                    "reapplying change_speed after guided position transition "
-                    "speed_mps=%.2f speed_type=%s",
-                    speed_mps,
-                    speed_type,
-                )
-                self._command_long(
-                    master,
-                    mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED,
-                    [float(speed_type), speed_mps, -1.0, 0.0, 0.0, 0.0, 0.0],
-                )
-        self._last_guided_setpoint_kind = "position"
 
     def _send_local_position(self, master, command: ActionCommand) -> None:
         yaw = command.params.get("yaw")

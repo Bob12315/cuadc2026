@@ -37,7 +37,8 @@ RKNNLite 和 Python 环境兼容。不要承诺 Ubuntu 24.04、Debian、Armbian 
 
 ## 已验证的 NanoPC-T6 参考基线（2026-08-30）
 
-以下是对已有正常运行板卡 `~/cuadc2026` 的**只读**盘点结果。它是排障和部署时的参考，
+以下是 2026-08-30 对当时已有板卡 `~/cuadc2026` 的**只读**盘点记录，不代表当前配置或今日
+硬件状态。它是排障和部署时的参考，
 不是可以跳过前述检查的硬编码前提；尤其不要把其中的环境名、IP 或视频来源套用到另一块
 板卡。
 
@@ -148,8 +149,8 @@ ss -lntup
 先确定用户指定的仓库路径。如果仓库不存在，可以在用户确认目标目录后克隆：
 
 ```bash
-git clone https://github.com/Bob12315/uav_system-rk3588.git
-cd uav_system-rk3588
+git clone https://github.com/Bob12315/cuadc2026.git
+cd cuadc2026
 ```
 
 如果仓库已经存在，不得重新克隆覆盖。必须先运行：
@@ -179,8 +180,9 @@ scripts/healthcheck/check_rk3588.sh
 ```
 
 还要解析，而不是只检查，`config/yolo.yaml` 的 `model_path`。项目的规范 FP16 部署模型是
-`data/models/cuadc2026-fp16.rknn`；不得把历史 INT8 模型设为默认。当前仓库配置和 NanoPC-T6
-参考基线却选择了另一个 FP16 文件 `gazebo_dataset-fp16.rknn`，且两者哈希不同。这是必须在
+`data/models/cuadc2026-fp16.rknn`；不得把历史 INT8 模型设为默认。当前根配置及
+`rk3588-real/profile.yaml` 选择 `cuadc-fp16.rknn`；SITL profile 选择
+`gazebo_dataset-fp16.rknn`。这些文件的哈希不同。这是必须在
 新实机部署前由硬件/视觉负责人裁决的配置差异，不能由部署 Agent 擅自切换。无论保留还是
 迁移，都要记录实际路径、哈希、检测类别和实测验证证据；不得因为文件名不同就在运行中的
 板卡上自动改写 `model_path`。
@@ -204,7 +206,7 @@ bash scripts/install/install_app_env.sh
 APP_ENV_NAME=app bash scripts/install/install_app_env.sh
 ```
 
-脚本会检查 Linux ARM64、环境名和 Python 版本，通过 `environment-app.yml` 单次安装
+脚本支持 Linux x86_64/ARM64，并检查 Python 版本，通过 `environment-app.yml` 单次安装
 `requirements/app.txt`，然后执行健康检查。不要自行重新设计 requirements 或把 app 与 yolo
 合并为一个环境。
 
@@ -214,7 +216,6 @@ APP_ENV_NAME=app bash scripts/install/install_app_env.sh
 APP_ENV_NAME=app  # 新部署默认改为 uav-app
 APP_PYTHON="$(conda run -n "$APP_ENV_NAME" python -c 'import sys; print(sys.executable)')"
 "$APP_PYTHON" -m app.main --help
-"$APP_PYTHON" -m tools.telemetry_debug --help  # development diagnostic only
 ```
 
 验证后再次确认 `config/app.yaml` 中 `executor.send_commands` 为 `false`。
@@ -292,7 +293,8 @@ config/telemetry.yaml
 
 不得顺便修改 Action Mission、飞行高度、速度、投放参数或业务代码。
 
-视频 source 是输入协议选择，不是“总是接 USB 相机”的开关。参考板卡的数字 source `5600`
+视频 source 是输入协议选择。当前根配置为 `/dev/video41`，实机 profile 使用稳定的
+`/dev/v4l/by-id/` 路径；2026-08-30 参考快照及 SITL profile 的数字 source `5600`
 会启动仓库内的 GStreamer bridge，并监听 UDP `5600`；它没有可用 `/dev/video0` 是正常的。
 换成 V4L2、RTSP 或完整 pipeline 前，必须由硬件负责人确认实际输入格式、端口和上游发送端。
 
@@ -364,6 +366,30 @@ systemctl --user status uav-app.service
 systemctl --user status uav-yolo.service
 ```
 
+app 启动必须从环境变量或权限受限文件读取操作者口令。安装脚本和 unit 模板不会自动
+提供口令；在 SSH shell 中 `export` 也不会自动传给 systemd 用户服务。先确认已有凭据与
+drop-in，保留它们；新部署可用以下方式配置只含凭据文件路径的 drop-in，口令由用户在
+终端安全输入，不能由 Agent 从聊天读取：
+
+```bash
+mkdir -p "$HOME/.config/uav" "$HOME/.config/systemd/user/uav-app.service.d"
+umask 077
+read -rsp 'Web 操作者口令：' UAV_SETUP_WEB_PASSWORD
+echo
+printf '%s\n' "$UAV_SETUP_WEB_PASSWORD" > "$HOME/.config/uav/web-operator.password"
+unset UAV_SETUP_WEB_PASSWORD
+chmod 600 "$HOME/.config/uav/web-operator.password"
+cat > "$HOME/.config/systemd/user/uav-app.service.d/credentials.conf" <<'EOF'
+[Service]
+Environment="UAV_WEB_OPERATOR_PASSWORD_FILE=%h/.config/uav/web-operator.password"
+EOF
+systemctl --user daemon-reload
+```
+
+仅在对应文件不存在或已获准更新时写入。不要将凭据文件纳入仓库，也不要通过 `cat`、
+日志或服务的 `Environment` 输出打印口令。手动运行 app 时也必须先安全提供
+`UAV_WEB_OPERATOR_PASSWORD` 或 `UAV_WEB_OPERATOR_PASSWORD_FILE`。
+
 只有确认 SEND OFF、螺旋桨和载荷已移除后，才可以启动服务做只读验证。是否启用开机
 启动和 linger 应告知用户，并根据实际运行需求决定。
 
@@ -406,11 +432,12 @@ ui:
 `UAV_WEB_OPERATOR_PASSWORD` 或权限受限的 `UAV_WEB_OPERATOR_PASSWORD_FILE` 获取口令。口令
 不得写入 YAML、命令历史、日志或版本库。
 
-地址栏提示“连接不安全”与白名单错误不同：当前 Web UI 的浏览器 Origin 校验只接受
-`http://<host>:<port>`，所以从局域网用 HTTP 访问时，浏览器标记为不安全是预期行为。它不应
+地址栏提示“连接不安全”与白名单错误不同：app 本身提供 HTTP，没有配置 TLS。Origin
+自动匹配只接受同端口 `http://<host>:<port>`；精确列在 `allowed_origins` 中的 HTTPS Origin
+也可以通过校验，但这不会给 app 增加 TLS。所以从局域网用 HTTP 访问时，浏览器标记为不安全是预期行为。它不应
 通过关闭认证、扩大为公网网段、忽略证书警告或开启 SEND 来处理。仅可在受信任私有操作网中
 使用；如需要 HTTPS、跨网段或公网访问，必须先做单独的反向代理/TLS 与 Origin 支持的架构
-评审，不能把 HTTPS URL 直接加入当前 `allowed_origins`。
+评审，并核对代理后的 Host、Origin 和认证；只添加 HTTPS 白名单不能实现 HTTPS 服务。
 
 按浏览器或 API 返回结果区分问题：
 
@@ -450,6 +477,10 @@ systemctl --user --no-pager --full status uav-yolo.service uav-app.service
 
 首次启动且 YOLO 服务尚未运行时，可执行完整硬件健康检查。对运行中的 YOLO 服务，跳过会
 创建第二个 NPU runtime 的完整检查，执行其余只读验证即可：
+
+注意健康脚本目前固定检查并加载 `data/models/cuadc-fp16.rknn`，不是自动读取
+`config/yolo.yaml` 的 `model_path`。`failures=0` 不能代替 SITL 模型或规范实机模型的
+加载验证；需在 YOLO 停止的条件下另行核对实际配置模型和检测类别。
 
 ```bash
 # 仅在 uav-yolo.service 未运行时；按实际环境名传参。

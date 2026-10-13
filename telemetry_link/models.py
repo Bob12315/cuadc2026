@@ -12,7 +12,6 @@ class ControlType(str, Enum):
 
 
 class ActionType(str, Enum):
-    STOP_BODY_VELOCITY = "stop_body_velocity"
     ARM = "arm"
     DISARM = "disarm"
     SET_MODE = "set_mode"
@@ -31,7 +30,6 @@ class ActionType(str, Enum):
     GIMBAL_MANAGER_CONFIGURE = "gimbal_manager_configure"
     SET_SERVO = "set_servo"
     SET_RELAY = "set_relay"
-    RELEASE_PAYLOAD = "release_payload"
 
 
 @dataclass(slots=True)
@@ -127,7 +125,6 @@ class ControlCommand:
     yaw_rate: float | None = None
     timestamp: float = 0.0
     frame: int = 1
-    clear_after_send: bool = False
 
 
 @dataclass(slots=True)
@@ -135,8 +132,6 @@ class ActionCommand:
     action_type: ActionType
     params: dict[str, Any] = field(default_factory=dict)
     priority: int = 10
-    retries_left: int = 0
-    retry_interval_sec: float = 0.5
     created_at: float = 0.0
 
 

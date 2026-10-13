@@ -6,7 +6,7 @@
 
 ## 当前模型策略
 
-默认部署模型：
+AGENTS.md 规定的实机部署模型：
 
 ```text
 data/models/cuadc2026-fp16.rknn
@@ -17,6 +17,11 @@ data/models/cuadc2026-fp16.rknn
 ```text
 ../data/models/cuadc2026-fp16.rknn
 ```
+
+当前根配置与 `rk3588-real` profile 实际仍引用 `cuadc-fp16.rknn`，板端健康检查
+也检查该文件；视觉安装脚本检查规范模型 `cuadc2026-fp16.rknn`，`rk3588-sitl` profile 使用
+`gazebo_dataset-fp16.rknn`。规范、安装检查与实际引用尚未
+统一，不能把文件名相近视为模型等价，也不要未经检测验证直接替换模型。
 
 RK3588/RKNN 本身可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新完成量化
 校准并验证类别、置信度和检测结果正常，否则不要切回 INT8 默认部署。
@@ -93,8 +98,8 @@ INT8 文档假设而修改后处理。
 使用匹配板端 Runtime/Driver 的 `rknn-toolkit-lite2`。安装：
 
 ```bash
-conda activate uav-rk3588-yolo
 bash scripts/install/install_yolo_env.sh
+conda activate uav-rk3588-yolo
 ```
 
 禁止新增 x86、CUDA、PyTorch 或 GPU 推理路径。
@@ -107,14 +112,20 @@ python -m yolo_app.main
 ```
 
 显示、录像、视频源、UDP 目的地址和 Web stream 均由 `config/yolo.yaml` 管理。运行
-录像属于产物，应写入 `runtime/`；当前 `recording_dir` 若配置为仓库外路径，需要在
-后续配置清理阶段统一评审。
+录像属于产物，应写入 `runtime/`；当前 `recording_dir: ../runtime/videos` 相对于配置文件
+目录解析，指向仓库的 `runtime/videos/`。
 
 ## UDP 输出
 
-每帧发送包含 `target` 和 `scene` 的 JSON：
+当前 publisher 使用 schema major 2 的会话协议：启动及约每秒发送 `hello`，每帧发送
+`message_type: perception`。公共 envelope 包含 producer/session/clock 标识、sequence、
+UTC/monotonic 发送时间和 `ttl_ms`；帧数据位于 `payload`：
 
-- `target`：当前主目标、tracking_state、误差和尺寸。
-- `scene.detections`：当前全部检测。
+- `payload.target`：当前主目标、tracking_state、误差和尺寸；无有效目标时为 `null`。
+- `payload.detections`：该帧检测，按置信度排序，受数量和数据报大小上限限制；
+  `original_detection_count/truncated` 标明截断。
+- `payload.frame_id`、捕获 monotonic 时间、图像尺寸及可选录像状态。
 
-协议字段变化必须同步更新 app receiver、fusion、Web UI 和测试。
+app receiver 校验会话和时效后，把它转换为运行时的 target 与 scene 快照。
+`scene.detections` 是接收后的运行时表达，不是当前线上 JSON 的原始字段。
+协议字段变化必须同步更新 publisher、app receiver、契约、Web UI 和测试。

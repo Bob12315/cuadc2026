@@ -8,7 +8,8 @@
 - 与 `telemetry_link` 的 `DroneState`
 - 以及 `telemetry_link` 的 `GimbalState`
 
-合成为控制层唯一依赖的 `FusedState`。
+合成为 Action 运行时可消费的 `FusedState`。运行时也提供 scene、drone 等快照，
+`FusedState` 不是所有 Action 的唯一输入。
 
 ## 1. 职责边界
 
@@ -51,14 +52,22 @@ YOLO 输出的是相机坐标误差：
 - `ex_cam`
 - `ey_cam`
 
-由于相机挂在云台上，相机方向与机体方向不一定一致，因此控制层不能直接拿 `ex_cam / ey_cam` 控机体。
+相机方向与机体方向不一定一致；本模块的 `ex_body/ey_body` 只提供下面的近似。
+当前 `align_descend` 从 scene 中读取归一化图像误差并自行计算 BODY_NED 速度，
+不依赖这组融合误差；其相机朝向、符号和投放偏移约束见
+[坐标系说明](../docs/developer/coordinate_frames.md)。
 
-MVP 阶段先采用工程近似：
+当前 `fusion/rules.py` 先将反馈中的云台角度从度转换成弧度，再采用工程近似：
 
 ```text
-ex_body = ex_cam + gimbal_yaw
-ey_body = ey_cam + gimbal_pitch
+ex_body = ex_cam + radians(gimbal_state.yaw)
+ey_body = ey_cam + radians(gimbal_state.pitch)
 ```
+
+YOLO 的 `ex_cam/ey_cam` 是按图像半宽/半高归一化的无量纲误差，输出
+`gimbal_yaw/gimbal_pitch` 才是弧度。当前实现把这两种量直接相加，是保留的工程近似；
+不能把 `ex_body/ey_body` 声明为严格角误差，也不等同于视觉定位 Action 使用的地面投影
+或完整三维变换。
 
 当 `gimbal_valid=false` 时：
 
@@ -84,7 +93,7 @@ AND drone_state.connected == True
 
 `fusion_valid` 判定：
 
-- `DroneState` 本身有效
+- `DroneState` 已连接、不陈旧，且至少一个姿态/速度/高度/GPS/相对高度/LOCAL 位置/电池有效标志为真
 - 目标处于 `locked`
 - 且云台反馈满足当前配置要求
 
@@ -103,60 +112,15 @@ manager = FusionManager(FusionConfig(require_gimbal_feedback=True))
 fused_state = manager.update(perception_target, drone_state, gimbal_state)
 ```
 
-控制层后续应只依赖 `FusedState`，而不是自己再去拼 `YOLO + telemetry_link`。
+Action 应通过运行时快照读取所需状态，不自行连接 YOLO 或 telemetry 链路。
 
 当前 `FusedState` 由 Action Mission 运行时作为状态快照消费。它不进入旧
 mission/stage/control 适配器，也不直接形成飞行命令；Action 输出必须经过
 `ActionDispatcher` 与 P0 Safety Pipeline。
 
-## 5. 终端 Debug
+## 5. 正式状态检查
 
-当前仓库新增了独立的终端 debug 入口：
-
-- [debug_main.py](debug_main.py)
-
-它会：
-
-- 监听 YOLO 的 UDP 目标输出
-- 监听 `telemetry_link` 发出的本地 UDP 状态流
-- 调用 `FusionManager.update(...)`
-- 周期性在终端打印 `FusedState` 关键字段
-
-启动示例：
-
-```bash
-cd ~/uav_project/uav_system-rk3588/fusion
-python3 debug_main.py \
-  --telemetry-config ../config/telemetry.yaml \
-  --yolo-udp-ip 0.0.0.0 \
-  --yolo-udp-port 5005 \
-  --print-rate-hz 1 \
-  --require-gimbal-feedback
-```
-
-配套要求：
-
-- `yolo_app` 正在向 `udp_port=5005` 输出当前目标
-- `telemetry_link` 正在运行，且开启了 `state_udp_enabled: true`
-- `telemetry_link` 默认会把 `DroneState / GimbalState / LinkStatus` 发到 `127.0.0.1:5010`
-
-默认打印这些字段：
-
-- `target_valid`
-- `target_locked`
-- `track_id`
-- `tracking_state`
-- `ex_cam / ey_cam`
-- `ex_body / ey_body`
-- `gimbal_yaw / gimbal_pitch`
-- `yaw / roll / pitch / yaw_rate`
-- `vx / vy / vz / altitude`
-- `control_allowed`
-- `control_enabled`
-- `state_valid`
-- `fusion_valid`
-
-当前限制：
-
-- 当前 debug 入口依赖 `telemetry_link` 的本地 UDP 状态广播
-- 它不会自己再去连接飞控，因此不会和独立运行的 `telemetry_link` 抢串口
+当前感知与融合状态通过 app/Web UI 查看。旧 `tools/fusion_debug.py`、独立 telemetry
+文本工具及配套 `5010` 状态广播已删除；不再保留旧协议接收入口。
+YOLO 目标会话使用 app 的感知 UDP 接收器；Virtual Nadir 仍使用独立的本机姿态旁路
+`attitude_udp_publisher.py`（默认 `5011`），它与已删除的状态广播不同。

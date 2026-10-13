@@ -3,7 +3,8 @@
 本文面向需要处理飞控、场地或图像坐标的开发者。
 
 本文是项目坐标系的唯一规范源。不要再新增平行的 `coordinate_systems.md`。
-MAVLink frame 常量统一从 `telemetry_link/frames.py` 导入，不得在 Action 中硬编码整数。
+MAVLink frame 常量的契约源为 `contracts/frames.py`，Action 从 `contracts.frames` 导入；
+`telemetry_link.frames` 是兼容重导出。不得在 Action 中硬编码整数。
 
 ## LOCAL_NED
 
@@ -39,7 +40,8 @@ BODY_NED 速度不经过 FIELD 坐标转换。
 `ey_norm` 经 `image_y_sign=-1` 映射到机体后方/LOCAL_NED 南向偏移。不要恢复只影响
 显示的 mirror、输入层 mirror 或历史 `vy_sign=-1.0` 修正。
 
-对准下降每帧选择归一化距离画面中心最近的检测，直接以 `ex_norm/ey_norm` 控制机体速度。
+对准下降首次选择归一化距离画面中心最近的检测；之后优先复用同一 track ID，找不到该 ID
+时选择距离上次图像位置最近的检测，维持目标连续性。它以相对对准目标的 `ex/ey` 误差控制机体速度。
 默认 `vx_sign=-1.0`，即目标偏上时向前飞；横向为 `vy_sign=1.0`。
 
 到达初识别桶航点并进入 `align_descend` 后，立即使用 `release_target_ex/ey`
@@ -73,9 +75,12 @@ z_down_m = -altitude_m
 
 禁止用裸 `z` 表示高度而不说明 frame 和符号。
 
-## FIELD 到 LOCAL_NED
+## FIELD 到 GPS/GLOBAL
 
-设 `field_heading_yaw_rad` 是 FIELD `+Y` 在 LOCAL_NED 中的 yaw；`0` 表示北，
+schema v3 只建立 GPS 原点，不建立 LOCAL_NED 场地原点。当前 `goto_waypoint` 将 FIELD
+航点转换为 GPS/GLOBAL_RELATIVE_ALT_INT；它也接受已解析的 `lat/lon` 目标，但不生成 LOCAL_NED 航点。
+
+设 `field_heading_yaw_rad` 是 FIELD `+Y` 相对北的 yaw；`0` 表示北，
 `pi/2` 表示东：
 
 ```text
@@ -85,21 +90,25 @@ forward_E = sin(field_heading_yaw_rad)
 right_N = -sin(field_heading_yaw_rad)
 right_E =  cos(field_heading_yaw_rad)
 
-local_N = origin_N + field_y_m * forward_N + field_x_m * right_N
-local_E = origin_E + field_y_m * forward_E + field_x_m * right_E
-z_down = -altitude_m
+d_north = field_y_m * forward_N + field_x_m * right_N
+d_east  = field_y_m * forward_E + field_x_m * right_E
+
+lat = origin_lat + degrees(d_north / EARTH_RADIUS_M)
+lon = origin_lon + degrees(d_east / (EARTH_RADIUS_M * cos(radians(origin_lat))))
+global_relative_altitude_m = altitude_m
 ```
 
-`field/coordinates.py` 是 FIELD↔LOCAL_NED 转换的 **唯一实现源**。
-`field/context.py` 和 `missions/common/actions/goto_waypoint.py` 中的
-历史公式在迁移完成前仍需保持行为一致；后续各 Action 必须通过
-`CoordinateTransform` 进行转换，不得继续复制公式。
+经度由实现归一化，极点及非法坐标会被拒绝。以上是局部场地近似，完整校验以代码为准。
+`field/coordinates.py` 是 FIELD↔GPS 转换的 **唯一实现源**；`field/context.py` 调用
+`gps_to_field_from_origin`，`goto_waypoint` 调用 `field_to_gps`，不得继续复制转换公式。
+LOCAL_NED 的 `z_down=-altitude_m` 只解释上下符号，不意味着 FIELD 与飞控 EKF 使用同一高度或原点。
 
 ## 接口约定
 
 - LOCAL_NED 新接口优先使用 `north_m/east_m/z_down_m`。
 - FIELD 新接口优先使用 `field_x_m/field_y_m/altitude_m`。
 - BODY_NED 新接口优先使用 `vx_forward_mps/vy_right_mps/vz_down_mps`。
-- `x/y/z/frame/waypoint_mode` 仅作为迁移期兼容参数。
+- `goto_waypoint` 的兼容 `x/y` 只表示 FIELD 右/前；`waypoint_mode/target_frame` 不是
+  选择 LOCAL_NED 输出的开关。其他原始 `x/y/z/frame` 接口必须明确各自 frame。
 - 投放只能走 `payload_release` Action → `set_servo`，不能使用
   `release_payload()`、RC override 或直接 pymavlink。

@@ -43,7 +43,8 @@ CUDA、PyTorch GPU 或其他 YOLO 推理替代路径。
   修改前备份相关配置，记录改动，并在报告中给出恢复方法。
 - 不为安装方便执行不明来源脚本。必须执行的官方安装脚本先确认 URL 或仓库来源。
 - 不启动真实无人机 Action/Mission，也不连接或控制真实飞控。本文只允许本机 SITL 验证。
-- 所有仓库外的安装和构建目录默认放在用户主目录下，不把生成物写入本项目仓库。
+- 仓库外的安装和构建目录默认放在用户主目录下；项目运行日志、SITL 状态和临时生成物放在
+  `runtime/`，不写入源码或配置目录。
 
 ## 1. 只读预检
 
@@ -60,7 +61,18 @@ git --version 2>/dev/null || true
 cmake --version 2>/dev/null || true
 gz --versions 2>/dev/null || true
 conda --version 2>/dev/null || true
-env | grep -E '^(http|https|all|HTTP|HTTPS|ALL)_PROXY=' || true
+python3 - <<'PY'
+import os
+from urllib.parse import urlsplit
+for key in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+    value = os.environ.get(key)
+    if value:
+        try:
+            parsed = urlsplit(value)
+            print(f"{key}: scheme={parsed.scheme}, host={parsed.hostname}, port={parsed.port}, credentials={'present' if parsed.username or parsed.password else 'absent'}")
+        except ValueError:
+            print(f"{key}: set (invalid URL; value hidden)")
+PY
 ```
 
 检查当前项目和可能已经存在的外部仓库：
@@ -89,7 +101,7 @@ Python。安装后让当前非交互 shell 正确加载 Conda。
 `pip install -r`：
 
 ```bash
-cd <本项目仓库根目录>
+cd "<本项目仓库根目录>"
 conda env create -f environment-dev.yml
 ```
 
@@ -176,7 +188,7 @@ Tools/environment_install/install-prereqs-ubuntu.sh -y
 
 ```bash
 cd "$HOME/ardupilot"
-./waf configure
+./waf configure --board sitl
 ./waf copter
 ```
 
@@ -184,6 +196,9 @@ cd "$HOME/ardupilot"
 
 ```bash
 test -x "$HOME/ardupilot/build/sitl/bin/arducopter"
+cd "<本项目仓库根目录>"
+mkdir -p runtime/sitl/install-check
+cd runtime/sitl/install-check
 timeout 15 "$HOME/ardupilot/build/sitl/bin/arducopter" -S --model JSON
 ```
 
@@ -192,8 +207,11 @@ timeout 15 "$HOME/ardupilot/build/sitl/bin/arducopter" -S --model JSON
 
 ## 5. 安装 `ardupilot_gazebo`
 
-以 [SITL with Gazebo 官方文档](https://ardupilot.org/dev/docs/sitl-with-gazebo.html)和
-[`ardupilot_gazebo` README](https://github.com/Bob12315/ardupilot_gazebo.git) 为准。
+插件编译以 [SITL with Gazebo 官方文档](https://ardupilot.org/dev/docs/sitl-with-gazebo.html)和
+[上游 `ardupilot_gazebo` README](https://github.com/ArduPilot/ardupilot_gazebo) 为准。
+本项目比赛场景使用 [Bob12315 的场景 fork](https://github.com/Bob12315/ardupilot_gazebo)，
+包含 `cuadc2026_rescue.sdf`、固定下视相机参数和 payload bridge；这些不是上游标准 Iris 示例。
+记录该 fork 的实际 commit，不要以只克隆上游仓库代替比赛场景安装。
 
 安装 Harmonic 对应依赖：
 
@@ -242,34 +260,34 @@ gst-inspect-1.0 x264enc rtph264depay h264parse rtph264pay avdec_h264
 
 ## 6. 联调验证
 
-使用项目脚本验证 Gazebo 与本机 Copter SITL。先编辑
-`/home/level6/uav_ws/cuadc2026/scripts/run_iris_gimbal_sitl.sh` 顶部的路径变量，使其与本机
-实际安装位置一致；只改路径值，不改启动逻辑、端口或其他代码：
-
-- `ARDUPILOT_DIR=/home/level6/ardupilot`
-- `GZ_REPO_DIR=/home/level6/gz_ws/src/ardupilot_gazebo`
-- `GZ_PARAM_FILE=/home/level6/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm`
-- `GZ_WORLD=/home/level6/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf`
-
-本机的以上四项已是脚本当前默认值；仅当安装目录不同才修改。确认路径文件存在后，再启动测试。
-
-该测试不连接 RK3588。脚本默认将 `GCS_HOST` 和 `VIDEO_HOST` 设为 `127.0.0.1`；如为其他
-测试临时覆盖，必须明确指定目标地址。运行：
+使用 `scripts/run_iris_gimbal_sitl.sh` 验证 Gazebo 与本机 Copter SITL。通过环境变量指定
+实际安装路径，无需修改脚本。脚本当前 `GCS_HOST` 默认是队伍现场地址 `10.101.31.108`，
+`VIDEO_HOST` 默认跟随它；本节安装检查必须显式覆盖为 `127.0.0.1`，避免把数据发往现场设备。
+参数文件和 world 的默认路径也是维护者本机路径，须显式覆盖。确认对应文件存在后运行：
 
 ```bash
-cd /home/level6/uav_ws/cuadc2026
+cd "<本项目仓库根目录>"
 . ~/.bashrc
-ARDUPILOT_DIR=/home/level6/ardupilot \
-  GZ_REPO_DIR=/home/level6/gz_ws/src/ardupilot_gazebo \
-  GZ_PARAM_FILE=/home/level6/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm \
-  GZ_WORLD=/home/level6/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf \
-  bash scripts/run_iris_gimbal_sitl.sh
+mkdir -p runtime/sitl/install-check
+PROJECT_REPO_ROOT="$PWD"
+cd runtime/sitl/install-check
+GCS_HOST=127.0.0.1 VIDEO_HOST=127.0.0.1 \
+  ARDUPILOT_DIR="$HOME/ardupilot" \
+  GZ_REPO_DIR="$HOME/gz_ws/src/ardupilot_gazebo" \
+  GZ_PARAM_FILE="$HOME/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm" \
+  GZ_WORLD="$HOME/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf" \
+  bash "$PROJECT_REPO_ROOT/scripts/run_iris_gimbal_sitl.sh"
 ```
 
 脚本会分别启动 Gazebo、JSON Copter、payload bridge 和 RTP relay。此次只判定 Gazebo 世界成功
 加载、Copter 显示 `Starting SITL: JSON` 且 JSON 控制接口连接到 `127.0.0.1:9002` 为通过；不执行
 arm、takeoff、Mission，也不向 RK3588 或任何真实飞控发送数据。验证结束后关闭本次启动的终端。
 payload bridge 或 RTP relay 的单独报错不应掩盖 Gazebo/SITL 的核心启动结果，但应记录在最终报告。
+
+辅助脚本内部会切换到 ArduPilot 源码目录再启动 `sim_vehicle.py`，因此外层 `cd runtime/`
+不能改变它的 SITL 文件输出位置。检查结束后把本次日志和证据整理到项目 `runtime/`；
+需要直接指定 SITL 输出目录时，按新手 SITL 文档的手动方式使用 `--use-dir`，不要为安装
+检查顺手修改辅助脚本的启动逻辑。
 
 如果插件仓库现有世界、模型或参数文件名与项目文档不同，以实际 commit 为证据报告差异，不要
 伪造缺失文件或随意下载第三方替代物。

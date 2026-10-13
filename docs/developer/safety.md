@@ -19,8 +19,10 @@ Action output
   → ActionRuntimeService
   → ActionDispatcher
   → ActionSafetyPipeline
+  → VehicleCommandPort adapter
   → LinkManager
-  → telemetry_link CommandSender
+  → CommandBroker / CommandBrokerWorker
+  → MavlinkEnvelopeWriter → MavlinkCommandEncoder
   → MAVLink
 ```
 
@@ -56,14 +58,18 @@ Action 实发至少同时要求：
 - 停止、切换或失败退出连续 BODY_NED Action 时必须发送明确 zero/stop。
 - 必须清理旧 continuous command 和 pending LOCAL_POSITION，避免恢复连接后重放。
 - telemetry 断线、状态 stale 或控制不允许时必须停止连续发送。
-- 丢失视觉目标不得沿用旧速度继续飞行。
+- 丢失视觉目标不得沿用旧水平速度继续飞行。投放对准生成零速等待；完整模板的最终返航
+  对准显式允许首次获取目标后丢失视觉时以零水平速度继续下降，到最终高度结束。
+  这属于 `continue_descending_on_target_loss` 的明确策略，并非重放旧命令。
 
 ## Field Reference
 
 - 未确认 Field Reference 时必须拒绝实发 FIELD 航点。
 - mission 执行中 FIELD origin/heading 冻结。
 - yaw、GPS Home 或 EKF Origin 变化不能自动改写已确认 reference。
-- GPS A/B 只辅助场地大方向；最终投放依赖视觉对准和激光高度。
+- GPS A/B 用于确定场地原点和方向，粗 GPS 目标用于导航；投放对准使用视觉误差与飞控高度。
+  当前 `align_descend` 优先读取 relative altitude，缺失时回退 `local_z`，没有直接使用激光测距输入。
+  模板还允许 30 秒对准超时后继续投放，故不能把 `payload_released` 视为视觉对准或实物投放成功证明。
 
 ## 投放
 
@@ -78,9 +84,10 @@ SERVO 输出通道不是遥控器 RC 输入通道。禁止 `release_payload()`�
 
 ## YOLO 与 telemetry 失效
 
-- YOLO 超时：目标无效，跟踪/对准命令停止，不保留旧速度。
+- YOLO 超时：目标无效，不保留旧水平速度；投放对准零速等待，最终返航对准按上文明确的
+  丢目标下降策略处理。不能把停止水平跟踪误写为所有场景都停止下降。
 - telemetry heartbeat/RX 超时：connected=false、stale=true、control_allowed=false，
-  CommandSender 停止连续控制。
+  链路运行时停止连续控制并清理陈旧命令。
 - gimbal feedback 丢失时，依赖云台反馈的 Action 不得误放行。
 
 ## 实机前检查

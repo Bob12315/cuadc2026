@@ -1,6 +1,6 @@
 # Stable Core v1 readiness manifest（2026-08-16）
 
-本 manifest 描述当前已落盘的内部 stable-core readiness，不代表 CF-25 production cutover 或 CF-28 freeze
+本 manifest 描述 2026-08-16 已落盘的内部 stable-core readiness，不代表 CF-25 production cutover 或 CF-28 freeze
 已经验收。严格冻结状态以 `python scripts/validate_stable_core.py --strict` 为准。
 
 ## 契约与 schema

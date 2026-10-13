@@ -7,22 +7,25 @@ snapshot capture、一次 RunCoordinator advance、driver 外部 Port 调用、�
 publication。Action 只返回 typed Effect；Mission reducer 只返回 typed intent；Coordinator 不调用硬件 Port；
 CoreScheduler 是新路径唯一允许持有 CoreCycleDriver 的 cadence owner。
 
-`takeoff`、`land`、`change_speed` 已有原生 feedback-driven ActionModule。其余 Action 仍经过明确
-compatibility adapter，所以下列 legacy 接口仍描述当前 production，而不是最终冻结接口。
+当前 core readiness catalog 仅将 `land`、`change_speed` 注册为原生 feedback-driven
+ActionModule。`takeoff` 和其余 Action 仍通过明确的 `LegacyActionModuleAdapter`；
+离线目录中已有原生起飞 helper 不代表当前 catalog 已采用该实现。下列 legacy 接口
+仍描述当前 production，而不是最终冻结接口。
 
 ## ActionModule
 
 Action 位于 `missions/common/actions/`，由 `ActionRunner` 调用：
 
-```python
+```text
 start(params)
 update(context) -> ActionResult
 stop()
 reset()
 ```
 
-`ActionResult` 可包含 `done`、`failed`、`reason`、`detail` 和结构化 `actions`。
-Action 不直接发送 MAVLink。
+`contracts.action.ActionResult` 可包含 `done`、`failed`、`reason`、`output`、`detail`
+和 typed `effects`。`actions` 是 effects 的请求字典兼容视图和序列化字段；构造函数
+只接收 typed effects，不接收 `actions=`。Action 不直接发送 MAVLink。
 
 ## ActionRuntimeService
 
@@ -36,22 +39,27 @@ Action 时负责清理连续命令和 pending LOCAL_POSITION，并按路径需�
 
 ## ActionDispatcher
 
-接收 Action request，执行 Action send-actions 与系统 send-commands 双门控，并路由：
+接收 typed Effect，经请求白名单、不可变 `RunAuthorization` 和系统 SEND 双门控，
+通过 `ActionSafetyPipeline` 后派发。当前 `execution/policy.py` 允许的请求类型为：
 
-- `local_position`
+- `global_goto`（`goto_waypoint` 的 FIELD/已定位 GPS 目标）
 - `body_velocity` / `flight_command`
 - `set_servo`
 - `set_mode` / `arm` / `takeoff` / `land`
-- YOLO target command
-- Field heading 确认（只记录内部状态，不发送飞行动作）
+- `condition_yaw` / `change_speed`
+- `clear_continuous_commands`
+- `yolo_lock_target`（只需 run 授权，不要求飞行 SEND，不进入 LinkManager）
 
-当前 dispatcher 调用 LinkManager 公开接口。连续命令的统一 shaping 是已知未决安全
-项，不得声称旧 FlightCommandExecutor 仍在生效。
+当前 dispatcher 注入只写 VehicleCommandPort adapter，最终调用 LinkManager 公开接口。
+FIELD 确认由 FieldService/Web 标定流程完成，不是 dispatcher 请求类型。
+`ActionSafetyPipeline` 已执行参数校验、包线限制和独立 watchdog；slew/rate limit 仍禁用。
+不得声称旧 FlightCommandExecutor 仍在生效。
 
 ## Runtime context
 
 context 包含 drone、gimbal、link、perception、scene、health、command，以及当前
-Field Reference 第一版字段。坐标和字段命名见
+schema v3 runtime GPS Field Reference 投影及兼容 heading 字段。它只建立 FIELD↔GPS，
+不提供 FIELD→LOCAL_NED 原点。坐标和字段命名见
 [坐标系规范](../../developer/coordinate_frames.md) 和
 [action_contracts.md](action_contracts.md)。
 

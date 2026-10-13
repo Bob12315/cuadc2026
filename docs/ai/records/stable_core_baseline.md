@@ -3,6 +3,10 @@
 本记录冻结本次稳定核心实现开始前的工作区事实。目录中的 `.git` 无法被 Git 识别，因此这是源码快照基线，
 不声明 commit、branch、clean worktree 或可用 `git reset` 回滚。
 
+这是 2026-08-16 环境的历史事实，不能据此推断当前目录也没有 Git、没有核心目录
+或仍允许 Web tick 推进；当前状态应重新检查，并参考
+[当前架构](../architecture/current_architecture.md)。
+
 ## 安全与运行边界
 
 - `config/app.yaml` 的 `executor.send_commands` 为 `false`。

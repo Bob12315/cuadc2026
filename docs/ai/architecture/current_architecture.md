@@ -21,8 +21,7 @@ Web UI
   → Action Lab / Action Mission
   → ActionRuntimeService
   → ActionRunner
-  → thin missions/common/actions/* adapters
-  → guidance/* pure algorithms
+  → missions/common/actions/*（需要时调用 guidance/* 纯算法）
   → ActionDispatcher
   → ActionSafetyPipeline
   → LinkManager
@@ -41,16 +40,18 @@ Web UI
 | --- | --- |
 | `app/` | 4 个薄文件：入口、严格配置和 composition root |
 | `application/` | 用例服务、运行状态、Mission 编排、WebServices 门面 |
-| `missions/common/actions/` | 原子 Action 适配器；只管理生命周期和 typed effect |
-| `missions/common/lifecycle/` | Action 生命周期状态；不拥有任务级子流程 |
+| `missions/common/actions/` | 原子 Action 的生命周期、参数/完成判断与 typed effect；`align_descend` 当前也在此实现目标锁定和下降控制 |
 | `guidance/` | 无全局状态、Web、telemetry 或发送依赖的纯算法 |
 | `web_ui/` | FastAPI router、静态模块和唯一正式人工入口；只依赖 WebServices |
 | `telemetry_link/` | VehicleStatePort/VehicleCommandPort、队列、MAVLink 封装和发送 |
 | `fusion/` | 感知与飞控/云台状态融合，不发送命令 |
 | `yolo_app/` | RKNNLite/NPU 感知和 UDP 输出，不连接 MAVLink |
 
-旧 terminal/curses UI 已从仓库移除；相关仍在使用的共用逻辑位于 `app/`，不得重新建立
+旧 terminal/curses UI 已从仓库移除；当前共用用例和运行逻辑位于 `application/`，不得重新建立
 独立 terminal 人工操作入口。
+
+历史 `missions/common/lifecycle/` 已删除，不能把该路径当作现有 owner 或认为
+`align_descend` 仍只是 thin wrapper；共享定位/融合数学按需从 `guidance/` 调用。
 
 ## 已废弃旧主线
 

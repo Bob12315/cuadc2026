@@ -22,7 +22,7 @@
 | --- | --- |
 | `rescue_2026_full_auto.json` | 当前完整 GPS-first 比赛流程 |
 | `drop_two_targets.json` | 双目标投放分项流程 |
-| `recon_gps.json` | GPS 危险标识侦察分项流程 |
+| `recon_gps.json` | GPS 侦察航迹分项流程（实时识别，尚未接入采集/排名） |
 
 历史参考模板已删除；它们不参与正式 catalog 和 validator。
 
@@ -32,7 +32,7 @@
 python scripts/validate_action_missions.py
 ```
 
-validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证。
+validator 检查模板结构、Action 注册与参数 schema、步骤引用，不代表通过 SITL 或实飞验证。
 
 ## Field Profile
 
@@ -45,7 +45,7 @@ validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证�
 ## RK3588 Profiles
 
 ```text
-config/profiles/rk3588-real/profile.yaml — 实机差异（当前仅安全声明）
+config/profiles/rk3588-real/profile.yaml — 实机遥测、模型、摄像头、姿态补偿差异与安全声明
 config/profiles/rk3588-sitl/profile.yaml — SITL 数据源、模型和视频差异
 ```
 
@@ -60,17 +60,24 @@ profile 只保存差异，通过受审 renderer 生成生效配置；不保存�
 任何 profile 在 `executor.send_commands` 不是严格 `false` 时都拒绝应用。
 实机 profile 使用 `cuadc-fp16.rknn` 和实机 MAVLink/摄像头；SITL profile 使用
 `gazebo_dataset-fp16.rknn`、UDP 14550 和仿真视频源。
+AGENTS.md 规定的实机模型是 `cuadc2026-fp16.rknn`，与当前实机 profile 的引用尚未统一；
+模型更换需要检测验证，不应只按文件名直接替换。详见[YOLO 说明](../yolo_app/README.md)。
+
+旧 `save_rk3588_*.sh` 已删除。profile 应用仅渲染 telemetry/yolo 差异，
+不会复制 Action Mission 或旧 mission 配置。调参后将现场快照保存到 `runtime/`，
+审阅后仅把必要差异写入对应 `profile.yaml`，不要把完整根配置复制进 profile。
 
 ## 部署
 
-安装或刷新 systemd 用户服务：
+安装或刷新 systemd 用户服务（立即启动前还需按[部署指南](../docs/ai/guides/DEPLOY_RK3588.md)
+向 systemd 用户管理器提供 Web 操作者凭据）：
 
 ```bash
 bash scripts/deploy/install_systemd_user_services.sh --dry-run
 bash scripts/deploy/install_systemd_user_services.sh --enable-now
 ```
 
-配置变化后执行只读板卡检查：
+配置变化后在板端执行健康检查；它会加载模型并执行空白帧 NPU 推理，不连接 MAVLink：
 
 ```bash
 bash scripts/healthcheck/check_rk3588.sh

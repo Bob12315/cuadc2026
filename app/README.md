@@ -6,7 +6,7 @@
 
 - 加载总配置。
 - 创建严格配置。
-- 调用 `application/` composition root。
+- 在 `bootstrap.py` 中组合并启动 `application/` 服务。
 - 提供 `python -m app.main` 入口。
 
 ## 主要文件

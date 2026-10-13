@@ -10,15 +10,13 @@ from contracts.platform.vehicle_state import LinkControlSnapshot, SourceSwitchRe
 
 try:
     from .attitude_udp_publisher import AttitudeUdpPublisher
-    from .command_queue import CommandQueue
-    from .command_sender import CommandSender
+    from .mavlink_command_encoder import MavlinkCommandEncoder
     from .config import EndpointConfig, TelemetryConfig
     from .frames import BODY_NED, LOCAL_NED
     from .mavlink_client import MavlinkClient
     from .models import ActionCommand, ActionType, ControlCommand, ControlType, DroneState, GimbalRateCommand, GimbalState, LinkStatus
     from .state_cache import StateCache
     from .telemetry_receiver import TelemetryReceiver
-    from .command_shadow import LegacyOneShotShadow
     from .command_broker import CommandBroker, CommandBrokerWorker
     from .mavlink_command_adapter import MavlinkCommandAdapter, WriteContext
     from .mavlink_encoder import MavlinkEnvelopeWriter
@@ -27,15 +25,13 @@ try:
         CancellationReceipt, CommandSubmissionReceipt, SubmissionState, VehicleCommandEnvelope)
 except ImportError:  # pragma: no cover - supports direct script execution
     from attitude_udp_publisher import AttitudeUdpPublisher
-    from command_queue import CommandQueue
-    from command_sender import CommandSender
+    from mavlink_command_encoder import MavlinkCommandEncoder
     from config import EndpointConfig, TelemetryConfig
     from frames import BODY_NED, LOCAL_NED
     from mavlink_client import MavlinkClient
     from models import ActionCommand, ActionType, ControlCommand, ControlType, DroneState, GimbalRateCommand, GimbalState, LinkStatus
     from state_cache import StateCache
     from telemetry_receiver import TelemetryReceiver
-    from command_shadow import LegacyOneShotShadow
     from command_broker import CommandBroker, CommandBrokerWorker
     from mavlink_command_adapter import MavlinkCommandAdapter, WriteContext
     from mavlink_encoder import MavlinkEnvelopeWriter
@@ -64,12 +60,11 @@ class SourceRuntime:
     endpoint: EndpointConfig
     cfg: TelemetryConfig
     state_cache: StateCache
-    command_queue: CommandQueue
     client: MavlinkClient
     stop_event: threading.Event
     worker_stop_event: threading.Event
     receiver: TelemetryReceiver | None = None
-    sender: CommandSender | None = None
+    encoder: MavlinkCommandEncoder | None = None
     monitor_thread: threading.Thread | None = None
     worker_lock: threading.Lock | None = None
     command_context: WriteContext | None = None
@@ -77,7 +72,6 @@ class SourceRuntime:
     broker_worker: CommandBrokerWorker | None = None
     command_adapter: MavlinkCommandAdapter | None = None
     ack_router: AckRouter | None = None
-    legacy_sender_started: bool = False
     field_version_matches: object | None = None
     execution_fence_query: object | None = None
     attitude_publisher: AttitudeUdpPublisher | None = None
@@ -147,76 +141,55 @@ class SourceRuntime:
                         connected=True, reconnecting=False, last_rx_time=bootstrap_now,
                         last_heartbeat_time=bootstrap_now, status_text="connected",
                     )
-                if self.cfg.v2_writer_enabled:
-                    self.sender = CommandSender(
-                        self.client, self.command_queue, self.state_cache, self.cfg,
-                        self.worker_stop_event, propagate_errors=True,
+                self.encoder = MavlinkCommandEncoder(
+                    self.client, self.state_cache, self.cfg,
+                )
+                assert self.command_context is not None
+                writer = MavlinkEnvelopeWriter(
+                    self.encoder,
+                    link_session_id=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
+                    target_system=lambda: self.client.target_system,
+                    target_component=lambda: self.client.autopilot_component,
+                    local_system=lambda: self.client.local_system,
+                    local_component=lambda: self.client.local_component,
+                    source=lambda: self.name,
+                )
+                self.command_broker = CommandBroker(
+                    writer=writer, source=lambda: self.name,
+                    link_session=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
+                    authorization_generation=lambda: self.command_context.authorization_generation,
+                    send_generation=lambda: self.command_context.send_generation,
+                    send_enabled=lambda: self.command_context.send_enabled,
+                    connected=lambda: self.state_cache.get_link_status().connected,
+                    monotonic_ns=time.monotonic_ns,
+                    field_version_matches=self.field_version_matches if callable(self.field_version_matches) else None,
+                    execution_fence_query=self.execution_fence_query,
+                )
+                self.ack_router = AckRouter(
+                    self.command_broker.update_ack,
+                    quarantine_ns=self.cfg.ack_quarantine_ms * 1_000_000,
+                )
+                writer.ack_router = self.ack_router
+                self.receiver = TelemetryReceiver(
+                    self.client, self.state_cache, self.cfg, self.worker_stop_event,
+                    receiver_generation, self.ack_router, self.name, self.attitude_publisher,
+                )
+                self.receiver.start()
+                self.broker_worker = CommandBrokerWorker(
+                    self.command_broker, idle_s=self.cfg.sender_idle_sleep_sec
+                )
+                self.command_adapter = MavlinkCommandAdapter(
+                    self.command_broker, self.broker_worker, source=self.name,
+                    session_id=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
+                    context=self.command_context,
+                )
+                if self.cfg.request_message_intervals:
+                    self._request_default_message_intervals()
+                elif self.cfg.attitude_udp_enabled:
+                    self._request_message_interval(
+                        "ATTITUDE", self.cfg.attitude_udp_rate_hz
                     )
-                    assert self.command_context is not None
-                    writer = MavlinkEnvelopeWriter(
-                        self.sender,
-                        link_session_id=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
-                        target_system=lambda: self.client.target_system,
-                        target_component=lambda: self.client.autopilot_component,
-                        local_system=lambda: self.client.local_system,
-                        local_component=lambda: self.client.local_component,
-                        source=lambda: self.name,
-                    )
-                    self.command_broker = CommandBroker(
-                        writer=writer, source=lambda: self.name,
-                        link_session=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
-                        authorization_generation=lambda: self.command_context.authorization_generation,
-                        send_generation=lambda: self.command_context.send_generation,
-                        send_enabled=lambda: self.command_context.send_enabled,
-                        connected=lambda: self.state_cache.get_link_status().connected,
-                        monotonic_ns=time.monotonic_ns,
-                        field_version_matches=self.field_version_matches if callable(self.field_version_matches) else None,
-                        execution_fence_query=self.execution_fence_query,
-                    )
-                    self.ack_router = AckRouter(
-                        self.command_broker.update_ack,
-                        quarantine_ns=self.cfg.ack_quarantine_ms * 1_000_000,
-                    )
-                    writer.ack_router = self.ack_router
-                    self.receiver = TelemetryReceiver(
-                        self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router, self.name, self.attitude_publisher,
-                    )
-                    self.receiver.start()
-                    self.broker_worker = CommandBrokerWorker(
-                        self.command_broker, idle_s=self.cfg.sender_idle_sleep_sec
-                    )
-                    self.command_adapter = MavlinkCommandAdapter(
-                        self.command_broker, self.broker_worker, source=self.name,
-                        session_id=lambda: str(self.state_cache.atomic_publication(time.time())["session_id"]),
-                        context=self.command_context,
-                    )
-                    if self.cfg.request_message_intervals:
-                        self._request_default_message_intervals(direct=True)
-                    elif self.cfg.attitude_udp_enabled:
-                        self._request_message_interval(
-                            "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=True
-                        )
-                    self.broker_worker.start()
-                else:
-                    self.sender = CommandSender(
-                        self.client, self.command_queue, self.state_cache, self.cfg,
-                        self.worker_stop_event,
-                    )
-                    self.sender.start()
-                    self.legacy_sender_started = True
-                    if self.cfg.request_message_intervals:
-                        self._request_default_message_intervals(direct=False)
-                    elif self.cfg.attitude_udp_enabled:
-                        self._request_message_interval(
-                            "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=False
-                        )
-                if self.receiver is None:
-                    self.receiver = TelemetryReceiver(
-                        self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router, self.name, self.attitude_publisher,
-                    )
-                    self.receiver.start()
+                self.broker_worker.start()
                 logger.info("source=%s Reconnected successfully", self.name)
                 return
             except Exception as exc:
@@ -238,16 +211,10 @@ class SourceRuntime:
             if self.receiver is not None:
                 self.receiver.join(timeout=1.0)
                 self.receiver = None
-            if self.sender is not None and self.legacy_sender_started:
-                self.sender.join(timeout=1.0)
-            self.legacy_sender_started = False
-            self.sender = None
+            self.encoder = None
             self.command_adapter = None
             self.command_broker = None
             self.ack_router = None
-            self.command_queue.clear_control()
-            self.command_queue.clear_gimbal_rate()
-            self.command_queue.clear_actions()
             if close_client:
                 self.client.close()
 
@@ -269,7 +236,7 @@ class SourceRuntime:
             if self.stop_event.wait(0.2):
                 break
 
-    def _request_default_message_intervals(self, *, direct: bool) -> None:
+    def _request_default_message_intervals(self) -> None:
         requested_attitude = False
         for message_name, rate_hz in self.cfg.message_interval_hz.items():
             if self.stop_event.is_set():
@@ -277,24 +244,24 @@ class SourceRuntime:
             if message_name == "ATTITUDE" and self.cfg.attitude_udp_enabled:
                 rate_hz = max(rate_hz, self.cfg.attitude_udp_rate_hz)
                 requested_attitude = True
-            self._request_message_interval(message_name, rate_hz, direct=direct)
+            self._request_message_interval(message_name, rate_hz)
         if self.cfg.attitude_udp_enabled and not requested_attitude and not self.stop_event.is_set():
             self._request_message_interval(
-                "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=direct
+                "ATTITUDE", self.cfg.attitude_udp_rate_hz
             )
 
     def _request_message_interval(
-        self, message_name: str, rate_hz: float, *, direct: bool
+        self, message_name: str, rate_hz: float
     ) -> None:
         command = ActionCommand(
             action_type=ActionType.REQUEST_MESSAGE_INTERVAL,
             params={"message_name": message_name, "rate_hz": rate_hz},
             priority=20,
-            retries_left=1,
-            retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
             created_at=time.time(),
         )
-        if direct and self.sender is not None:
+        if self.encoder is not None:
             quarantine_id = uuid.uuid4().hex
             if self.ack_router is not None:
                 publication = self.state_cache.atomic_publication(time.time())
@@ -308,7 +275,7 @@ class SourceRuntime:
                     local_system=self.client.local_system,
                     local_component=self.client.local_component,
                 ))
-            self.sender._send_action(command)
+            self.encoder._send_action(command)
             if self.ack_router is not None:
                 self.ack_router.mark_transmitted(quarantine_id)
                 deadline = time.monotonic_ns() + 250_000_000
@@ -321,8 +288,6 @@ class SourceRuntime:
                 # ACK key. ACK/timeout closes the slot but starts quarantine;
                 # do not register the next request until that protection ends.
                 self.stop_event.wait(self.cfg.ack_quarantine_ms / 1000.0)
-        else:
-            self.command_queue.put_action(command)
 
 
 class LinkManager:
@@ -341,9 +306,6 @@ class LinkManager:
         self.active_lock = threading.Lock()
         self._source_revision = 0
         self._last_switch_cancel_receipt = None
-        self._speed_override_lock = threading.Lock()
-        self._speed_overrides: dict[str, dict[int, float]] = {}
-        self._one_shot_shadows: dict[str, LegacyOneShotShadow] = {}
         self.runtimes: dict[str, SourceRuntime] = {}
         self._start_thread: threading.Thread | None = None
         self._field_version_port: object | None = None
@@ -371,19 +333,12 @@ class LinkManager:
                 endpoint=endpoint,
                 cfg=cfg,
                 state_cache=StateCache(cfg.heartbeat_timeout_sec, cfg.rx_timeout_sec),
-                command_queue=CommandQueue(),
                 client=MavlinkClient(endpoint),
                 stop_event=threading.Event(),
                 worker_stop_event=threading.Event(),
                 field_version_matches=self._field_version_matches,
                 execution_fence_query=self._execution_fence_query,
                 attitude_publisher=self.attitude_publisher,
-            )
-            self._speed_overrides[source_name] = {}
-            runtime = self.runtimes[source_name]
-            self._one_shot_shadows[source_name] = LegacyOneShotShadow(
-                source=source_name,
-                session_id=lambda runtime=runtime: str(runtime.state_cache.atomic_publication(time.time())["session_id"]),
             )
 
     def set_field_reference_version_port(self, port: object) -> None:
@@ -457,7 +412,6 @@ class LinkManager:
                 _cancel_runtime(runtime,
                     CancelScope.SOURCE, source=runtime.name, reason="source_switch_queue_clear",
                 )
-            runtime.command_queue.clear_actions()
         self._last_switch_cancel_receipt = barrier_receipt
         with self.active_lock:
             self.active_source = source_name
@@ -465,7 +419,6 @@ class LinkManager:
         attitude_publisher = getattr(self, "attitude_publisher", None)
         if attitude_publisher is not None:
             attitude_publisher.switch_source(source_name)
-        self._clear_continuous_commands()
         self.logger.info("switched active_source=%s previous_source=%s", source_name, previous_source)
         return True
 
@@ -495,11 +448,6 @@ class LinkManager:
                 self._last_switch_cancel_receipt.barrier_disposition.value,
             None if self._last_switch_cancel_receipt is None else
                 self._last_switch_cancel_receipt.barrier_id)
-
-    def _clear_continuous_commands(self) -> None:
-        for runtime in self.runtimes.values():
-            runtime.command_queue.clear_control()
-            runtime.command_queue.clear_gimbal_rate()
 
     def _active_runtime(self) -> SourceRuntime:
         source_name = self.get_active_source()
@@ -547,28 +495,20 @@ class LinkManager:
         runtime = self._active_runtime()
         if runtime.command_adapter is not None:
             return runtime.command_adapter.submit_control(command)
-        if self.cfg.v2_writer_enabled:
-            return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
-        runtime.command_queue.put_control(command)
+        return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
 
     def submit_action_command(self, command: ActionCommand) -> None:
         runtime = self._active_runtime()
         if runtime.command_adapter is not None:
             return runtime.command_adapter.submit_action(command)
-        if self.cfg.v2_writer_enabled:
-            return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
-        self._one_shot_shadows[self.get_active_source()].observe(command)
-        runtime.command_queue.put_action(command)
+        return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
 
     def submit_latest_action_command(self, command: ActionCommand) -> None:
         """Replace any pending action of the same type with this one."""
         runtime = self._active_runtime()
         if runtime.command_adapter is not None:
             return runtime.command_adapter.submit_action(command)
-        if self.cfg.v2_writer_enabled:
-            return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
-        self._one_shot_shadows[self.get_active_source()].observe(command)
-        runtime.command_queue.put_latest_action(command)
+        return CommandSubmissionReceipt("unavailable", SubmissionState.REJECTED, "command_backend_unavailable", uuid.uuid4().hex)
 
     def update_write_context(self, *, run_id: str | None, send_enabled: bool) -> None:
         for runtime in self.runtimes.values():
@@ -641,9 +581,6 @@ class LinkManager:
                 emit_stop_barrier=True, reason="flight_mode_not_guided",
             )
             return
-        runtime.command_queue.clear_control()
-        runtime.command_queue.clear_gimbal_rate()
-        runtime.command_queue.clear_actions()
         self.stop_body_velocity_and_clear()
 
     def clear_pending_local_position_actions(self) -> None:
@@ -654,8 +591,6 @@ class LinkManager:
                 CancelScope.CONTINUOUS_STREAM, stream_id="navigation",
                 reason="navigation_cleared")
             return
-        runtime.command_queue.clear_actions(ActionType.LOCAL_POSITION)
-        runtime.command_queue.clear_actions(ActionType.GLOBAL_GOTO)
 
     def hold_current_local_position(self, priority: int = 0) -> bool:
         """Send a LOCAL_POSITION hold at the current drone position.
@@ -690,8 +625,6 @@ class LinkManager:
                 CancelScope.CONTINUOUS_STREAM, stream_id="all", emit_stop_barrier=True,
                 reason="continuous_commands_cleared")
             return
-        runtime.command_queue.clear_control()
-        runtime.command_queue.clear_gimbal_rate()
 
     def set_mode(self, mode: str, priority: int = 5) -> None:
         return self.submit_action_command(
@@ -699,8 +632,8 @@ class LinkManager:
                 action_type=ActionType.SET_MODE,
                 params={"mode": mode},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -710,8 +643,8 @@ class LinkManager:
             ActionCommand(
                 action_type=ActionType.ARM,
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -721,8 +654,8 @@ class LinkManager:
             ActionCommand(
                 action_type=ActionType.DISARM,
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -733,24 +666,20 @@ class LinkManager:
                 action_type=ActionType.TAKEOFF,
                 params={"altitude_m": float(altitude_m)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
 
     def land(self, priority: int = 2) -> None:
         runtime = self._active_runtime()
-        runtime.command_queue.clear_control()
-        runtime.command_queue.clear_gimbal_rate()
-        runtime.command_queue.clear_actions(ActionType.LOCAL_POSITION)
-        runtime.command_queue.clear_actions(ActionType.GLOBAL_GOTO)
         return self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.LAND,
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -773,42 +702,23 @@ class LinkManager:
                     "relative": bool(relative),
                 },
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
 
     def change_speed(self, speed_mps: float, speed_type: int = 1, priority: int = 4) -> None:
-        source_name = self.get_active_source()
-        with self._speed_override_lock:
-            self._speed_overrides[source_name][int(speed_type)] = float(speed_mps)
         return self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.CHANGE_SPEED,
                 params={"speed_mps": float(speed_mps), "speed_type": int(speed_type)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
-
-    def _active_speed_overrides(self) -> list[dict[str, float | int]]:
-        """Return the active source's transient flight-controller speed targets.
-
-        ArduCopter can reset DO_CHANGE_SPEED when a Guided position setpoint
-        changes the internal Guided submode.  Position commands carry this
-        snapshot so CommandSender can reapply it immediately after that
-        transition without bypassing the normal telemetry send path.
-        """
-        source_name = self.get_active_source()
-        with self._speed_override_lock:
-            overrides = dict(self._speed_overrides[source_name])
-        return [
-            {"speed_type": speed_type, "speed_mps": overrides[speed_type]}
-            for speed_type in sorted(overrides)
-        ]
 
     def set_home_current(self, priority: int = 4) -> None:
         self.submit_action_command(
@@ -816,8 +726,8 @@ class LinkManager:
                 action_type=ActionType.SET_HOME,
                 params={"current": True, "lat": 0.0, "lon": 0.0, "alt": 0.0},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -828,8 +738,8 @@ class LinkManager:
                 action_type=ActionType.SET_HOME,
                 params={"current": False, "lat": float(lat), "lon": float(lon), "alt": float(alt)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -849,14 +759,13 @@ class LinkManager:
             params["yaw"] = float(yaw_rad)
         if field_reference_version is not None:
             params["field_reference_version"] = field_reference_version
-        params["_speed_overrides"] = self._active_speed_overrides()
         return self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.GLOBAL_GOTO,
                 params=params,
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -873,14 +782,13 @@ class LinkManager:
         params = {"x": float(x), "y": float(y), "z": float(z), "frame": int(frame)}
         if yaw is not None:
             params["yaw"] = float(yaw)
-        params["_speed_overrides"] = self._active_speed_overrides()
         return self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.LOCAL_POSITION,
                 params=params,
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -905,8 +813,8 @@ class LinkManager:
                     "yaw_deg": yaw_deg,
                 },
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -917,8 +825,8 @@ class LinkManager:
                 action_type=ActionType.SET_ROI_LOCATION,
                 params={"lat": float(lat), "lon": float(lon), "alt": float(alt)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -929,8 +837,8 @@ class LinkManager:
                 action_type=ActionType.ROI_NONE,
                 params={"gimbal_device_id": int(gimbal_device_id)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -951,8 +859,8 @@ class LinkManager:
                     "primary_compid": primary_compid,
                 },
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -969,8 +877,8 @@ class LinkManager:
                 action_type=ActionType.SET_SERVO,
                 params={"channel": int(channel), "pwm": int(pwm)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -981,16 +889,10 @@ class LinkManager:
                 action_type=ActionType.SET_RELAY,
                 params={"relay_id": int(relay_id), "state": bool(state)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
-        )
-
-    def release_payload(self, payload_id: int, priority: int = 3) -> None:
-        raise NotImplementedError(
-            "release_payload is disabled; use set_servo_output_pwm(...) "
-            "or set_servo(...) for MAV_CMD_DO_SET_SERVO payload release"
         )
 
     def request_message_interval(self, message_name: str, rate_hz: float, priority: int = 6) -> None:
@@ -999,8 +901,8 @@ class LinkManager:
                 action_type=ActionType.REQUEST_MESSAGE_INTERVAL,
                 params={"message_name": str(message_name), "rate_hz": float(rate_hz)},
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -1023,8 +925,8 @@ class LinkManager:
                     "mount_mode": int(self.cfg.gimbal_mount_mode if mount_mode is None else mount_mode),
                 },
                 priority=priority,
-                retries_left=self.cfg.action_cmd_retries,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
+
+
                 created_at=time.time(),
             )
         )
@@ -1046,7 +948,6 @@ class LinkManager:
             )
         if runtime.command_adapter is not None:
             return runtime.command_adapter.submit_gimbal_rate(command)
-        runtime.command_queue.put_gimbal_rate(command)
 
     def send_velocity_command(
         self,
@@ -1110,18 +1011,6 @@ class LinkManager:
             return _cancel_runtime(runtime,
                 CancelScope.CONTINUOUS_STREAM, stream_id="body", emit_stop_barrier=True,
                 reason="stop_body_velocity_and_clear")
-        runtime.command_queue.clear_control()
-        self.submit_latest_action_command(
-            ActionCommand(
-                action_type=ActionType.STOP_BODY_VELOCITY,
-                params={"frame": BODY_NED},
-                priority=0,
-                retries_left=0,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
-                created_at=time.time(),
-            )
-        )
-
     # ------------------------------------------------------------------
     # semantic wrappers (added T1 — zero behavioural change)
     # ------------------------------------------------------------------

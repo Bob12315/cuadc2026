@@ -25,19 +25,26 @@ docs/developer/safety.md
 
 ## 派发和连续命令
 
-追加：`execution/dispatcher.py`、`execution/policy.py`、`application/action_runtime.py`、
-`telemetry_link/link_manager.py`、`command_queue.py`、`command_sender.py`、相关测试。
+追加：`execution/dispatcher.py`、`execution/policy.py`、`execution/authorization.py`、
+`execution/safety_pipeline.py`、`execution/safety_config.py`、`config/safety.yaml`、
+`application/action_runtime.py`、
+`telemetry_link/link_manager.py`、`command_broker.py`、`mavlink_encoder.py`、
+`mavlink_command_encoder.py`、`mavlink_command_adapter.py`、相关测试。
 这是高风险边界；确认 stop/zero、双门控和断线清理。
 
 ## Field Reference/坐标
 
-追加：`field/context.py`、`missions/common/actions/goto_waypoint.py`、涉及 FIELD 的
-Action、Web UI Field Heading 代码和坐标测试。不得复制第三份转换公式。
+追加：`field/coordinates.py`、`field/context.py`、`field/service.py`、
+`field/calibration_session.py`、`field/calibration_transaction.py`、`field/_reference_store.py`、
+`config/field_profiles/competition_runtime.json`、`missions/common/actions/goto_waypoint.py`、
+涉及 FIELD 的 Action、Web UI runtime sampling 代码和坐标测试。
+schema v3 只建立 GPS 场地参考，不伪造 LOCAL_NED origin；不得复制转换公式。
 
 ## Web UI
 
 追加：`application/web_services.py`、`web_ui/server.py`、`web_ui/api_routers.py`、
-`web_ui/routers/`、`static/index.html`、`static/app.js`、`static/js/` 和 Web contract/integration tests。
+`web_ui/routers/`、`web_ui/static/index.html`、`web_ui/static/app.js`、`web_ui/static/js/`
+和 Web contract/integration tests。
 不要把 terminal UI 当正式入口，也不要把 SystemRunner 注入 Web。
 
 ## YOLO
@@ -50,7 +57,7 @@ Action、Web UI Field Heading 代码和坐标测试。不得复制第三份转�
 追加：`docs/ai/plans/architecture_refactor_tasks.md`、
 `docs/ai/plans/platform_adapter_interface_refactor_plan.md`、
 `docs/ai/plans/stable_core_refactor_plan.md`、`docs/ai/architecture/interfaces.md`、
-`contracts/ports.py`、`contracts/platform/`（存在后）、`application/ports/`（存在后）、
+`contracts/ports.py`、`contracts/platform/`、`application/ports/`（尚未落地的计划目录）、
 `application/web_services.py`、`application/system_control.py`、`application/mission_service.py`、
 `application/action_runtime.py`、`telemetry_link/ports.py`、`web_ui/dto.py`、`web_ui/security.py`、
 `web_ui/context.py`、`web_ui/api_routers.py`、`web_ui/routers/`、相关 adapter/contract/integration/SITL
@@ -66,8 +73,8 @@ Action、Web UI Field Heading 代码和坐标测试。不得复制第三份转�
 
 追加：`docs/ai/plans/architecture_refactor_tasks.md`、`docs/ai/plans/stable_core_refactor_plan.md`、
 `docs/ai/plans/platform_adapter_interface_refactor_plan.md`、
-`contracts/core/`（存在后）、`missions/core/`（存在后）、`missions/common/actions/`、`execution/`、
-`application/core/`（存在后）、`application/action_runtime.py`、`application/mission_service.py`、
+`contracts/core/`、`missions/core/`、`missions/common/actions/`、`execution/`、
+`application/core/`、`application/action_runtime.py`、`application/mission_service.py`、
 `application/state_store.py`、`application/runner.py`、`app/bootstrap.py` 及对应 contracts/unit/property/
 differential/integration/SITL 测试。
 

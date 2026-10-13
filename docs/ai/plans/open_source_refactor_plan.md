@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 状态 | P0、P1、P2 已完成；P3 阻塞于发布权利与维护者决策 |
-| 适用仓库 | `uav_system-rk3588` |
+| 适用仓库 | `cuadc2026`（早期名称 `uav_system-rk3588`） |
 | 当前正式主线 | Action Mission + Web UI |
 | 计划目标平台 | Linux x86_64、Linux ARM64 |
 | YOLO 目标平台 | Linux ARM64 RK3588 + RKNNLite/NPU |
@@ -76,7 +76,9 @@ Profile、centerline binding 与旧 Mission/Stage 入口的退役。
 
    - 使用 RKNNLite；
    - 使用 `.rknn` 模型；
-   - 当前默认实机模型保持为 `data/models/cuadc2026-fp16.rknn`；
+   - 项目规范实机模型为 `data/models/cuadc2026-fp16.rknn`；当前根配置和 real profile
+     实际选择 `data/models/cuadc-fp16.rknn`，存在配置与规范偏差，部署前需要核对模型
+     来源和检测/标定验证，不在本计划以外自动替换模型；
    - 禁止增加 x86 YOLO、CUDA、PyTorch 或通用 GPU 推理路径；
    - 未安装 YOLO 环境时，App 必须能够以显式“无本地视觉进程”模式启动。
 
@@ -254,7 +256,8 @@ P0～P2 完成
 
 ### 风险
 
-当前 Web 可监听 `0.0.0.0`，且通用 command API 能触发多种状态变化。公开仓库不能默认假设
+P0-0 历史基线中 Web 默认监听 `0.0.0.0`，且通用 command API 能触发多种状态变化。
+P0-1 已收口这些入口；以下说明原始风险和验收要求。公开仓库不能默认假设
 局域网内所有访问者都可信，也不能允许通用命令入口绕过 Action 安全主线。
 
 ### 目标架构
@@ -1033,9 +1036,12 @@ RKNN runtime/driver、配置 profile 和 git commit。
 
 ## 8. 待维护者补齐的实施参数
 
-以下内容尚未在讨论中确定，因此被列为硬门禁，而不是交给实现者猜测：
+以下列出本计划最初的决策清单。D-01～D-07 的历史确认见
+[P0 安全决策](../records/p0_security_decisions.md)，现行限制以 `config/safety.yaml` 为准；
+D-08 的支持矩阵见[平台支持](../../developer/platform_support.md)。
+D-09～D-12 尚缺维护者证据，仍是 P3 硬门禁，不交给实现者猜测。
 
-| 编号 | 待确定内容 | 阻塞阶段 |
+| 编号 | 决策内容 | 对应阶段（历史或尚未完成） |
 | --- | --- | --- |
 | D-01 | BODY_NED 各轴最大速度 | P0-2 实机默认值 |
 | D-02 | 最大下降率、偏航速率、slew | P0-2 实机默认值 |
@@ -1081,7 +1087,8 @@ RKNN runtime/driver、配置 profile 和 git commit。
 
 ## 10. 推荐的首次实施顺序
 
-开始执行时，不直接从大规模删除或依赖重排入手。第一个实施批次应当是：
+以下记录本计划开始时的顺序；P0～P2 的历史完成证据见第 9 节，
+不得重复执行已经退役的中间接口。最初的实施批次为：
 
 1. P0-0 建立发送入口清单和失效行为测试；
 2. 确认 D-06/D-07，实施 P0-1 Web 控制面收口；

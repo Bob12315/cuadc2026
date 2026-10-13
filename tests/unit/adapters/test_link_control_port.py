@@ -22,12 +22,10 @@ def test_link_control_revision_conflict_does_not_switch() -> None:
     manager.active_lock = threading.Lock()
     manager.active_source = "real"
     manager._source_revision = 3
-    queue = SimpleNamespace(clear_actions=lambda: None)
     manager.runtimes = {
-        "real": SimpleNamespace(command_broker=None, command_queue=queue),
-        "sitl": SimpleNamespace(command_broker=None, command_queue=queue),
+        "real": SimpleNamespace(command_broker=None),
+        "sitl": SimpleNamespace(command_broker=None),
     }
-    manager._clear_continuous_commands = lambda: None
     conflict = manager.activate_source("sitl", expected_revision=2)
     assert conflict.accepted is False
     assert manager.active_source == "real"
