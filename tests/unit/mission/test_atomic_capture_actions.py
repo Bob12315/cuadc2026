@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from field.coordinates import field_to_gps_from_origin, gps_to_field_from_origin
+from field.models import gps_enu_deltas
 from missions.common.actions.gps_capture_view import GpsCaptureViewAction
-from missions.common.actions.gps_fuse_views import _output_item
+from missions.common.actions.gps_fuse_views import GpsFuseViewsAction, _output_item
 from guidance.gps_derived_enu_fusion import GpsDerivedEnuFusion, GpsFusionConfig, GpsLocalizedObject
 from guidance.target_projection import GpsProjectionCamera, GpsRawEstimate, GpsTargetProjector
 
@@ -71,6 +73,46 @@ def test_gps_fuse_output_uses_json_arrays_for_source_metadata() -> None:
     assert output["source_frames"] == [101, 102]
     assert output["seen_count"] == 2
     assert output["count"] == 2
+
+
+def test_gps_fuse_clamps_target_field_x_without_changing_field_y(monkeypatch: pytest.MonkeyPatch) -> None:
+    origin_lat, origin_lon, heading = 34.0, 108.0, 0.7
+    objects = []
+    for index, field_x in enumerate((-6.0, 2.0, 6.0), start=1):
+        gps = field_to_gps_from_origin(
+            field_x, 8.0, 0.0, origin_lat=origin_lat, origin_lon=origin_lon,
+            field_heading_yaw_rad=heading,
+        )
+        objects.append(GpsLocalizedObject(
+            id=index, lat=gps.lat, lon=gps.lon, east_m=0.0, north_m=0.0,
+            sample_count=1, raw_count=1, class_name="bucket", confidence=0.9,
+            cluster_spread_m=0.0, source_waypoints=("VIEW_1",), source_frames=(index,),
+        ))
+    monkeypatch.setattr(GpsDerivedEnuFusion, "fuse", lambda self, estimates: objects)
+
+    action = GpsFuseViewsAction()
+    action.start({"views": [], "field_x_limit_m": 4.0})
+    result = action.update({
+        "field_reference": {
+            "is_ready_for_field_to_gps": True,
+            "origin_lat": origin_lat, "origin_lon": origin_lon,
+        },
+        "field_heading_yaw_rad": heading,
+    })
+
+    assert result.done and not result.failed
+    for item, expected_x in zip(result.output["localized_objects"], (-4.0, 2.0, 4.0)):
+        field = gps_to_field_from_origin(
+            item["lat"], item["lon"], 0.0,
+            origin_lat=origin_lat, origin_lon=origin_lon,
+            field_heading_yaw_rad=heading,
+        )
+        assert field.field_x_m == pytest.approx(expected_x, abs=1e-6)
+        assert field.field_y_m == pytest.approx(8.0, abs=1e-6)
+        if abs(expected_x) == 4.0:
+            north, east = gps_enu_deltas(origin_lat, origin_lon, item["lat"], item["lon"])
+            assert item["north_m"] == pytest.approx(north)
+            assert item["east_m"] == pytest.approx(east)
 
 
 def test_gps_fusion_requires_distinct_source_waypoints_when_configured() -> None:

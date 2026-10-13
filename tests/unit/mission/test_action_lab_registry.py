@@ -43,6 +43,9 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
 
     align = dict(first_step["align_descend"])
     align["enabled"] = True
+    align["target_altitude_m"] = 1.2
+    align["release_max_speed_mps"] = 0.1
+    align["final_settle_time_s"] = 0.5
     align["target_acquisition_timeout_s"] = None
     align["release_deadband_ex"] = 0.02
     align["release_deadband_ey"] = 0.02
@@ -82,7 +85,9 @@ def test_action_definition_defaults_match_full_v2_and_keep_send_boundaries() -> 
 
     fuse = dict(first_step["gps_fuse_views"])
     fuse["views"] = []
+    fuse.pop("field_x_limit_m")
     assert definitions["gps_fuse_views"].default_params == fuse
+    assert definitions["gps_fuse_views"].parameter_schema["properties"]["field_x_limit_m"]["exclusiveMinimum"] == 0
 
     select = dict(first_step["select_drop_targets"])
     select["objects"] = []

@@ -42,6 +42,13 @@ BODY_NED 速度不经过 FIELD 坐标转换。
 对准下降每帧选择归一化距离画面中心最近的检测，直接以 `ex_norm/ey_norm` 控制机体速度。
 默认 `vx_sign=-1.0`，即目标偏上时向前飞；横向为 `vy_sign=1.0`。
 
+到达初识别桶航点并进入 `align_descend` 后，立即使用 `release_target_ex/ey`
+作为图像对准目标，整个下降过程以 `ex/ey - release_target_ex/ey` 控制；
+Web UI 同时显示该偏差目标红点。下降阶段仍使用普通增益和限速，
+到最终高度后切换最终增益和限速，并进行稳定等待、对准投票和速度判定。
+投放速度门槛 `release_max_speed_mps` 只比较水平速度 `sqrt(vx² + vy²)`，
+不包含垂直速度 `vz`；水平速度分量缺失或非有限值时不放行。
+
 ## FIELD
 
 FIELD 是比赛场地坐标系：

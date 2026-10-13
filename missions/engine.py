@@ -21,6 +21,7 @@ class MissionActionStep:
 @dataclass(slots=True)
 class MissionOrchestratorStatus:
     running: bool
+    paused: bool
     done: bool
     failed: bool
     current_index: int
@@ -105,6 +106,8 @@ class MissionOrchestrator:
         self.runtime = runtime
         self.steps = list(steps)
         self.running = False
+        self.paused = False
+        self._paused_at_monotonic: float | None = None
         self.done = False
         self.failed = False
         self.current_index = 0
@@ -126,6 +129,8 @@ class MissionOrchestrator:
 
     def start(self, *, link_manager: object | None = None) -> None:
         self.running = True
+        self.paused = False
+        self._paused_at_monotonic = None
         self.done = False
         self.failed = False
         self.current_index = 0
@@ -147,7 +152,7 @@ class MissionOrchestrator:
         link_manager: object | None = None,
         send_commands: bool = False,
     ) -> MissionOrchestratorStatus:
-        if not self.running or self.done or self.failed:
+        if not self.running or self.paused or self.done or self.failed:
             return self.status()
 
         # Drive the current action
@@ -235,6 +240,29 @@ class MissionOrchestrator:
 
         return self.status()
 
+    def pause(self, *, reason: str = "flight_mode_not_guided", mode: str = "UNKNOWN") -> None:
+        if not self.running or self.paused:
+            return
+        self.paused = True
+        self._paused_at_monotonic = self._monotonic()
+        self.reason = reason
+        self.detail = {"flight_mode": mode, "paused_step_index": self.current_index}
+
+    def resume(self) -> float:
+        if not self.running or not self.paused or self._paused_at_monotonic is None:
+            return 0.0
+        duration_s = max(0.0, self._monotonic() - self._paused_at_monotonic)
+        if self._mission_started_monotonic is not None:
+            self._mission_started_monotonic += duration_s
+        timing = self._step_timings.get(self.current_index)
+        if timing is not None and timing.get("running_since_monotonic") is not None:
+            timing["running_since_monotonic"] += duration_s
+        self.paused = False
+        self._paused_at_monotonic = None
+        self.reason = "resumed_guided"
+        self.detail = {"pause_duration_s": round(duration_s, 3)}
+        return duration_s
+
     def stop(self, *, link_manager: object | None = None, hold_current: bool = False) -> None:
         stop = getattr(self.runtime, "stop", None)
         if callable(stop):
@@ -246,6 +274,8 @@ class MissionOrchestrator:
         )
         self._finish_mission_timing()
         self.running = False
+        self.paused = False
+        self._paused_at_monotonic = None
         self.reason = "stopped"
 
     def reset(self, *, link_manager: object | None = None, hold_current: bool = False) -> None:
@@ -253,6 +283,8 @@ class MissionOrchestrator:
         if callable(reset):
             reset(link_manager, hold_current=hold_current)
         self.running = False
+        self.paused = False
+        self._paused_at_monotonic = None
         self.done = False
         self.failed = False
         self.current_index = 0
@@ -283,6 +315,10 @@ class MissionOrchestrator:
         if self.done:
             self.reason = "skip_ignored_done"
             self.detail = {"requested_reason": reason}
+            return self.status()
+
+        if self.paused:
+            self.reason = "skip_ignored_paused"
             return self.status()
 
         if self.failed:
@@ -378,6 +414,7 @@ class MissionOrchestrator:
         detail["mission_duration_s"] = self._mission_duration_s()
         return MissionOrchestratorStatus(
             running=self.running,
+            paused=self.paused,
             done=self.done,
             failed=self.failed,
             current_index=self.current_index,
@@ -617,9 +654,10 @@ class MissionOrchestrator:
             return
         started = timing.get("running_since_monotonic")
         if started is not None:
+            now = self._paused_at_monotonic if self._paused_at_monotonic is not None else self._monotonic()
             timing["duration_s"] = float(timing.get("duration_s", 0.0)) + max(
                 0.0,
-                self._monotonic() - float(started),
+                now - float(started),
             )
         timing["running_since_monotonic"] = None
         timing["status"] = status
@@ -629,18 +667,22 @@ class MissionOrchestrator:
         if self._mission_started_monotonic is None:
             return
         if self._mission_finished_monotonic is None:
-            self._mission_finished_monotonic = self._monotonic()
+            self._mission_finished_monotonic = (
+                self._paused_at_monotonic if self._paused_at_monotonic is not None else self._monotonic()
+            )
 
     def _mission_duration_s(self) -> float:
         started = self._mission_started_monotonic
         if started is None:
             return 0.0
         finished = self._mission_finished_monotonic
-        end = self._monotonic() if finished is None else finished
+        end = (
+            self._paused_at_monotonic if self._paused_at_monotonic is not None else self._monotonic()
+        ) if finished is None else finished
         return round(max(0.0, end - started), 3)
 
     def _step_timing_payload(self) -> dict[int, dict[str, Any]]:
-        now = self._monotonic()
+        now = self._paused_at_monotonic if self._paused_at_monotonic is not None else self._monotonic()
         payload: dict[int, dict[str, Any]] = {}
         for index in range(len(self.steps)):
             timing = self._step_timings.get(index)

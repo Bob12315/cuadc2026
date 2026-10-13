@@ -172,6 +172,9 @@ class VehicleCommandAdapter:
 
     def clear_continuous_commands(self): return self._cleanup("clear_continuous_commands")
     def clear_pending_local_position_actions(self): return self._cleanup("clear_pending_local_position_actions")
+    def cancel_run_commands(self, run_id: str):
+        link = self._provider()
+        return None if link is None else link.cancel_run_commands(run_id)
     def stop_body_velocity_and_clear(self): return self._cleanup("stop_body_velocity_and_clear")
     def hold_current_local_position(self): return self._cleanup("hold_current_local_position")
     def cancel_stale_field_commands(self, reason: str = "field_reference_changed"):

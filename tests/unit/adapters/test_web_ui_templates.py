@@ -47,9 +47,9 @@ def test_api_client_is_only_fetch_owner() -> None:
     assert [path.name for path in owners] == ["api_client.js"]
 
 
-def test_video_panel_draws_the_final_height_drop_offset_marker_only() -> None:
+def test_video_panel_draws_drop_offset_marker_throughout_alignment() -> None:
     source = (STATIC / "js/video_panel.js").read_text()
-    assert 'detail.speed_control_phase !== "final_altitude"' in source
+    assert 'detail.speed_control_phase !== "final_altitude"' not in source
     assert 'detail.release_offset_active !== true' in source
     assert 'detail.release_target_ex' in source
     assert 'detail.release_target_ey' in source

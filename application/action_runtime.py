@@ -164,6 +164,9 @@ class ActionRuntimeService:
     def status(self) -> dict[str, object]:
         return self.runner.status()
 
+    def resume_after_pause(self, duration_s: float) -> None:
+        self.runner.resume_after_pause(duration_s)
+
     def clear_navigation_queue(
         self,
         link_manager: object | None = None,

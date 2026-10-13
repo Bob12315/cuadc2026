@@ -7,6 +7,9 @@ from .result import ActionResult
 
 
 class ActionModule(ABC):
+    def resume_after_pause(self, duration_s: float) -> None:
+        """Exclude a mission pause from this action's elapsed-time limits."""
+
     @abstractmethod
     def start(self, params: dict[str, Any] | None = None) -> None:
         ...

@@ -632,6 +632,20 @@ class LinkManager:
             "command_broker_unavailable", uuid.uuid4().hex,
         )
 
+    def cancel_run_commands(self, run_id: str) -> None:
+        """Drain a paused run, including queued one-shot mode/land commands."""
+        runtime = self._active_runtime()
+        if runtime.command_broker is not None:
+            _cancel_runtime(
+                runtime, CancelScope.RUN, run_id=run_id,
+                emit_stop_barrier=True, reason="flight_mode_not_guided",
+            )
+            return
+        runtime.command_queue.clear_control()
+        runtime.command_queue.clear_gimbal_rate()
+        runtime.command_queue.clear_actions()
+        self.stop_body_velocity_and_clear()
+
     def clear_pending_local_position_actions(self) -> None:
         """Remove queued navigation position targets so stale targets don't linger."""
         runtime = self._active_runtime()

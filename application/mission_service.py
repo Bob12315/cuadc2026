@@ -179,6 +179,7 @@ class MissionApplicationService:
             return {
                 "enabled": False,
                 "running": False,
+                "paused": False,
                 "done": False,
                 "failed": False,
                 "current_index": 0,
@@ -192,6 +193,7 @@ class MissionApplicationService:
         return {
             "enabled": True,
             "running": status.running,
+            "paused": status.paused,
             "done": status.done,
             "failed": status.failed,
             "current_index": status.current_index,
@@ -289,7 +291,7 @@ class MissionApplicationService:
             self._action_mission_next_tick_monotonic = None
             self.action_mission_orchestrator.stop(
                 link_manager=None,
-                hold_current=True,
+                hold_current=not self.action_mission_orchestrator.paused,
             )
             self._stop_action_mission_recording(trigger="action_mission_stop")
             self.action_runtime.dispatcher.clear_authorization("mission_stopped")
@@ -305,7 +307,7 @@ class MissionApplicationService:
             self.latest_drop_workflow_result = {}
             self.action_mission_orchestrator.reset(
                 link_manager=None,
-                hold_current=True,
+                hold_current=not self.action_mission_orchestrator.paused,
             )
             self._stop_action_mission_recording(trigger="action_mission_reset")
             self.action_runtime.dispatcher.clear_authorization("mission_reset")
@@ -319,13 +321,36 @@ class MissionApplicationService:
                 time.monotonic() + ACTION_MISSION_TICK_INTERVAL_S
             )
             orch = self.action_mission_orchestrator
+            if orch.running:
+                context = self.action_lab_context()
+                drone = context.get("drone")
+                mode = str(drone.get("mode") or "UNKNOWN").strip().upper() if isinstance(drone, dict) else "UNKNOWN"
+                if mode != "GUIDED":
+                    if not orch.paused:
+                        authorization = self.action_runtime.dispatcher.authorization
+                        command_port = self.action_runtime.dispatcher.command_port
+                        cancel_run = getattr(command_port, "cancel_run_commands", None)
+                        if authorization is not None and callable(cancel_run):
+                            cancel_run(authorization.run_id)
+                        self.action_runtime.dispatcher.safety_pipeline.stop_continuous(
+                            "flight_mode_not_guided", emit=False,
+                        )
+                        orch.pause(mode=mode)
+                        self.logger.warning("Action Mission paused: flight mode %s", mode)
+                    return orch.status()
+                if orch.paused:
+                    duration_s = orch.resume()
+                    self.action_runtime.resume_after_pause(duration_s)
+                    self.logger.info("Action Mission resumed in GUIDED after %.3fs", duration_s)
+            else:
+                context = self.action_lab_context()
             pre_index = orch.current_index
             pre_step = orch.steps[pre_index] if 0 <= pre_index < len(orch.steps) else None
             pre_name = pre_step.name if pre_step else None
             pre_label = pre_step.label if pre_step else None
 
             mission_status = orch.tick(
-                self.action_lab_context(),
+                context,
                 link_manager=None,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
@@ -405,6 +430,8 @@ class MissionApplicationService:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            if self.action_mission_orchestrator.paused:
+                return self.action_mission_status_payload()
             mission_status = self.action_mission_orchestrator.skip_current_step(
                 link_manager=None,
                 hold_current=True,

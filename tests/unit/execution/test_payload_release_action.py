@@ -127,7 +127,9 @@ def test_single_servo_output_9_release_action() -> None:
     assert result.actions[0]["params"]["pwm"] == 1700
 
 
-def test_dual_servo_outputs_use_per_channel_release_and_hold_pwm() -> None:
+def test_dual_servo_outputs_release_sequentially_with_ack_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [10.0]
+    monkeypatch.setattr(payload_release_module.time, "monotonic", lambda: now[0])
     action = PayloadReleaseAction()
     action.start(
         _params(
@@ -137,23 +139,26 @@ def test_dual_servo_outputs_use_per_channel_release_and_hold_pwm() -> None:
             ],
             servo_channels=[1],
             channels=[2],
+            release_wait_s=2.0,
         )
     )
 
-    release = action.update({})
-    for _ in range(5):
-        hold = action.update({})
-
-    assert [item["params"] for item in release.actions] == [
-        {"channel": 8, "pwm": 1200},
-        {"channel": 9, "pwm": 1700},
-    ]
-    assert release.actions[0]["key"].endswith("_release_servo8")
-    assert release.actions[1]["key"].endswith("_release_servo9")
-    assert hold.actions[0]["params"] == {"channel": 8, "pwm": 1700}
-    assert hold.actions[1]["params"] == {"channel": 9, "pwm": 1200}
-    assert hold.actions[0]["key"].endswith("_hold_servo8")
-    assert hold.actions[1]["key"].endswith("_hold_servo9")
+    release_8 = action.update({})
+    assert [item["params"] for item in release_8.actions] == [{"channel": 8, "pwm": 1200}]
+    now[0] = 12.0
+    hold_8 = action.update({})
+    assert not hold_8.done
+    assert [item["params"] for item in hold_8.actions] == [{"channel": 8, "pwm": 1700}]
+    now[0] = 12.9
+    assert action.update({}).actions == []
+    now[0] = 13.0
+    release_9 = action.update({})
+    assert [item["params"] for item in release_9.actions] == [{"channel": 9, "pwm": 1700}]
+    now[0] = 15.0
+    hold_9 = action.update({})
+    assert hold_9.done
+    assert [item["params"] for item in hold_9.actions] == [{"channel": 9, "pwm": 1200}]
+    assert action.update({}).actions == []
 
 
 def test_legacy_channels_are_compatible_servo_outputs() -> None:
@@ -196,17 +201,12 @@ def test_servo_channels_legacy_format_uses_global_pwm() -> None:
         )
     )
 
-    release = action.update({})
-    for _ in range(5):
-        hold = action.update({})
-
-    assert [item["params"] for item in release.actions] == [
-        {"channel": 8, "pwm": 1300},
-        {"channel": 9, "pwm": 1300},
+    assert action.servo_outputs == [
+        {"channel": 8, "release_pwm": 1300, "hold_pwm": 1800},
+        {"channel": 9, "release_pwm": 1300, "hold_pwm": 1800},
     ]
-    assert [item["params"] for item in hold.actions] == [
-        {"channel": 8, "pwm": 1800},
-        {"channel": 9, "pwm": 1800},
+    assert [item["params"] for item in action.update({}).actions] == [
+        {"channel": 8, "pwm": 1300},
     ]
 
 

@@ -763,6 +763,7 @@ button.active-choice {
 }
 .step-status.pending { color: var(--muted); border: 1px solid var(--line); }
 .step-status.running { color: #8ebcff; border: 1px solid rgba(89, 143, 255, .5); background: rgba(89, 143, 255, .08); }
+.step-status.paused { color: var(--warn); border: 1px solid rgba(237, 169, 61, .55); background: rgba(237, 169, 61, .09); }
 .step-status.done { color: var(--ok); border: 1px solid rgba(43, 194, 119, .5); background: rgba(43, 194, 119, .08); }
 .step-status.failed { color: var(--danger); border: 1px solid rgba(241, 93, 99, .6); background: rgba(241, 93, 99, .1); }
 .step-status.skipped,

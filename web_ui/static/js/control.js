@@ -208,6 +208,7 @@ function inferActionMissionStepStatus(actionMission, index, stepCount) {
   const timing = detail.step_timings?.[index] || detail.step_timings?.[String(index)] || {};
   const skippedSet = new Set((Array.isArray(detail.skipped_steps) ? detail.skipped_steps : []).map(s => s.index));
   if (skippedSet.has(index)) return "skipped";
+  if (payload.paused && index === current) return "paused";
   if (["done", "failed", "skipped", "continued", "stopped"].includes(timing.status)) return timing.status;
   if (timing.status === "running") return "running";
   if (timing.status === "pending" && detail.step_timings) return "pending";
@@ -327,12 +328,14 @@ function renderActionMissionStatus(actionMission) {
   if (actionResult) lastActionMissionResult = actionResult;
   setOptionalText("actionMissionSystemSend", sendEnabled ? "ON" : "OFF");
   setOptionalText("actionMissionEnabled", boolText(Boolean(payload.enabled), "是", "否"));
-  setOptionalText("actionMissionRunning", boolText(Boolean(payload.running), "是", "否"));
+  setOptionalText("actionMissionRunning", payload.paused ? "已暂停" : boolText(Boolean(payload.running), "是", "否"));
   setOptionalText("actionMissionDone", boolText(Boolean(payload.done), "是", "否"));
   setOptionalText("actionMissionFailed", boolText(Boolean(payload.failed), "是", "否"));
   setOptionalText("actionMissionIndex", payload.current_index ?? "--");
   setOptionalText("actionMissionCurrent", actionNameWithZh(payload.current_action));
-  setOptionalText("actionMissionReason", payload.reason || "--");
+  setOptionalText("actionMissionReason", payload.paused
+    ? `非 GUIDED 模式（${detail.flight_mode || "UNKNOWN"}），恢复 GUIDED 后自动继续`
+    : (payload.reason || "--"));
   setOptionalText("actionMissionDuration", actionMissionDurationLabel(detail.mission_duration_s));
   const warning = $("actionMissionSendWarning");
   if (warning) {
@@ -343,7 +346,7 @@ function renderActionMissionStatus(actionMission) {
   }
   const skipButton = $("actionMissionSkipCurrent");
   if (skipButton) {
-    const canSkip = Boolean(payload.enabled && payload.running && !payload.done && !payload.failed);
+    const canSkip = Boolean(payload.enabled && payload.running && !payload.paused && !payload.done && !payload.failed);
     skipButton.disabled = !canSkip;
   }
   const detailElement = $("actionMissionDetail");

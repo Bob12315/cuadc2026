@@ -30,27 +30,27 @@
     },
     {
       "name": "goto_waypoint",
-      "label": "goto_drop_center_4_5m",
+      "label": "goto_drop_center_5m",
       "on_failed": {
         "action": "continue"
       },
       "params": {
         "x": 0,
         "y": 32.5,
-        "altitude_m": 4.5,
+        "altitude_m": 5.0,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
         "field_yaw_deg": 0,
-        "tolerance_xy_m": 0.30,
-        "tolerance_z_m": 0.30,
+        "tolerance_xy_m": 0.3,
+        "tolerance_z_m": 0.3,
         "min_hold_updates": 4,
         "require_velocity_valid": true,
         "max_horizontal_speed_mps": 0.25,
         "max_vertical_speed_mps": 0.15,
-        "position_hysteresis_xy_m": 0.20,
-        "position_hysteresis_z_m": 0.10,
-        "horizontal_speed_hysteresis_mps": 0.10,
+        "position_hysteresis_xy_m": 0.2,
+        "position_hysteresis_z_m": 0.1,
+        "horizontal_speed_hysteresis_mps": 0.1,
         "vertical_speed_hysteresis_mps": 0.05,
         "reached_updates_decrement": 1,
         "control_reject_max_updates": 3,
@@ -58,7 +58,7 @@
         "max_duration_s": 180.0,
         "settle_time_s": 1.0,
         "priority": 5,
-        "key": "goto_drop_center_4_5m"
+        "key": "goto_drop_center_5m"
       }
     },
     {
@@ -79,7 +79,7 @@
           "fov_y_deg": 131.870643,
           "image_x_sign": 1,
           "image_y_sign": -1,
-          "ground_distance_scale": 0.3333333333333333
+          "ground_distance_scale": 0.21
         }
       },
       "on_failed": {
@@ -97,6 +97,7 @@
         "views": [
           "$drop_scan_view"
         ],
+        "field_x_limit_m": 4.0,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -142,8 +143,8 @@
           },
           {
             "channel": 9,
-            "release_pwm": 1745,
-            "hold_pwm": 1325
+            "release_pwm": 1835,
+            "hold_pwm": 1335
           }
         ],
         "multi_target_first_servo_outputs": [
@@ -218,18 +219,18 @@
       "params": {
         "enabled": "$drop_targets.first_alignment_enabled",
         "complete_on_timeout": true,
-        "target_altitude_m": 1.2,
+        "target_altitude_m": 1.1,
         "descend_speed_mps": 0.2,
-        "release_deadband_ex": 0.05,
-        "release_deadband_ey": 0.05,
+        "release_deadband_ex": 0.04,
+        "release_deadband_ey": 0.04,
         "release_target_ex": 0.0,
         "release_target_ey": 0.3,
-        "release_max_speed_mps": 0.1,
-        "final_settle_time_s": 0.5,
-        "kp_forward": 0.35,
-        "kp_right": 0.4,
-        "final_kp_forward": 0.25,
-        "final_kp_right": 0.25,
+        "release_max_speed_mps": 0.08,
+        "final_settle_time_s": 0.3,
+        "kp_forward": 0.42,
+        "kp_right": 0.42,
+        "final_kp_forward": 0.2,
+        "final_kp_right": 0.2,
         "ki_forward": 0.0,
         "ki_right": 0.0,
         "integral_limit": 0.0,
@@ -316,18 +317,18 @@
       "params": {
         "enabled": "$drop_targets.second_alignment_enabled",
         "complete_on_timeout": true,
-        "target_altitude_m": 1.2,
+        "target_altitude_m": 1.1,
         "descend_speed_mps": 0.2,
-        "release_deadband_ex": 0.05,
-        "release_deadband_ey": 0.05,
+        "release_deadband_ex": 0.04,
+        "release_deadband_ey": 0.04,
         "release_target_ex": 0.0,
-        "release_target_ey": -0.2,
-        "release_max_speed_mps": 0.1,
-        "final_settle_time_s": 0.5,
-        "kp_forward": 0.35,
-        "kp_right": 0.4,
-        "final_kp_forward": 0.25,
-        "final_kp_right": 0.25,
+        "release_target_ey": -0.05,
+        "release_max_speed_mps": 0.08,
+        "final_settle_time_s": 0.3,
+        "kp_forward": 0.42,
+        "kp_right": 0.42,
+        "final_kp_forward": 0.2,
+        "final_kp_right": 0.2,
         "ki_forward": 0.0,
         "ki_right": 0.0,
         "integral_limit": 0.0,
@@ -357,8 +358,8 @@
         "servo_outputs": [
           {
             "channel": 9,
-            "release_pwm": 1745,
-            "hold_pwm": 1325
+            "release_pwm": 1835,
+            "hold_pwm": 1335
           }
         ],
         "priority": 3,
@@ -401,26 +402,13 @@
       }
     },
     {
-      "name": "change_speed",
-      "label": "recon_speed_1mps",
-      "params": {
-        "speed_mps": 1,
-        "speed_type": "ground",
-        "priority": 4,
-        "key": "recon_speed_1mps"
-      },
-      "on_failed": {
-        "action": "continue"
-      }
-    },
-    {
       "name": "goto_waypoint",
       "label": "goto_recon_entry_4m",
       "on_failed": {
         "action": "continue"
       },
       "params": {
-        "x": -2,
+        "x": -3,
         "y": 56,
         "altitude_m": 4,
         "waypoint_mode": "field",
@@ -436,15 +424,28 @@
       }
     },
     {
+      "name": "change_speed",
+      "label": "recon_speed_1mps",
+      "params": {
+        "speed_mps": 0.2,
+        "speed_type": "ground",
+        "priority": 4,
+        "key": "recon_speed_1mps"
+      },
+      "on_failed": {
+        "action": "continue"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "recon_scan_goto_1",
       "on_failed": {
         "action": "continue"
       },
       "params": {
-        "x": -2,
+        "x": -3,
         "y": 56,
-        "altitude_m": 4,
+        "altitude_m": 3,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
@@ -464,9 +465,9 @@
         "action": "continue"
       },
       "params": {
-        "x": 2,
+        "x": 0,
         "y": 56,
-        "altitude_m": 4,
+        "altitude_m": 3,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
@@ -486,9 +487,9 @@
         "action": "continue"
       },
       "params": {
-        "x": 2,
-        "y": 59,
-        "altitude_m": 4,
+        "x": 3,
+        "y": 56,
+        "altitude_m": 3,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
@@ -508,9 +509,9 @@
         "action": "continue"
       },
       "params": {
-        "x": -2,
+        "x": 3,
         "y": 59,
-        "altitude_m": 4,
+        "altitude_m": 3,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
@@ -531,8 +532,8 @@
       },
       "params": {
         "x": 0,
-        "y": 57.5,
-        "altitude_m": 4,
+        "y": 59,
+        "altitude_m": 3,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "field_heading",
@@ -542,6 +543,28 @@
         "min_hold_updates": 1,
         "require_velocity_valid": false,
         "key": "recon_scan_goto_5",
+        "priority": 5
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "recon_scan_goto_6",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "x": -3,
+        "y": 59,
+        "altitude_m": 3,
+        "waypoint_mode": "field",
+        "target_frame": "global",
+        "yaw_mode": "field_heading",
+        "field_yaw_deg": 0,
+        "tolerance_xy_m": 0.4,
+        "tolerance_z_m": 0.3,
+        "min_hold_updates": 1,
+        "require_velocity_valid": false,
+        "key": "recon_scan_goto_6",
         "priority": 5
       }
     },
@@ -611,13 +634,14 @@
         "enabled": true,
         "complete_on_timeout": false,
         "target_acquisition_timeout_s": 2.0,
+        "continue_descending_on_target_loss": true,
         "target_altitude_m": 0.3,
         "descend_speed_mps": 0.2,
         "release_deadband_ex": 0.3,
         "release_deadband_ey": 0.3,
         "final_settle_time_s": 0.5,
-        "kp_forward": 0.35,
-        "kp_right": 0.4,
+        "kp_forward": 0.42,
+        "kp_right": 0.42,
         "final_kp_forward": 0.25,
         "final_kp_right": 0.3,
         "max_vx_mps": 0.3,
@@ -629,7 +653,10 @@
         "field_yaw_deg": 0,
         "yaw_speed_deg_s": 20.0,
         "priority": 5,
-        "key": "final_land_align"
+        "key": "final_land_align",
+        "ki_forward": 0.0,
+        "ki_right": 0.0,
+        "integral_limit": 0.0
       }
     },
     {

@@ -147,34 +147,55 @@ def test_descent_does_not_wait_for_alignment() -> None:
     assert _command(result).params["vz_cmd"] == 0.2
 
 
-def test_release_offset_applies_only_after_reaching_release_altitude() -> None:
+@pytest.mark.parametrize("offset_ey", [0.3, -0.4])
+def test_release_offset_applies_from_descent_through_final_altitude(offset_ey: float) -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.2,
-        "release_target_ex": 0.0,
-        "release_target_ey": 0.2,
+        "release_target_ex": 0.2,
+        "release_target_ey": offset_ey,
         "kp_forward": 1.0,
         "kp_right": 1.0,
+        "final_kp_forward": 0.5,
+        "final_kp_right": 0.5,
         "max_vx_mps": 1.0,
         "max_vy_mps": 1.0,
     })
-
     descending = action.update(_context(
-        frame_id=1, detections=[_detection(0.0, 0.1)], altitude_m=1.3,
+        frame_id=1, detections=[_detection(0.1, 0.1)], altitude_m=3.0,
     ))
     final_height = action.update(_context(
-        frame_id=2, detections=[_detection(0.0, 0.1)], altitude_m=1.2,
+        frame_id=2, detections=[_detection(0.1, 0.1)], altitude_m=1.2,
     ))
-
-    assert descending.detail["release_offset_active"] is False
-    assert descending.detail["alignment_error_ey"] == pytest.approx(0.1)
-    assert _command(descending).params["vx_cmd"] == pytest.approx(-0.1)
-    assert final_height.detail["release_offset_active"] is True
-    assert final_height.detail["release_target_ey"] == pytest.approx(0.2)
-    assert final_height.detail["alignment_error_ey"] == pytest.approx(-0.1)
-    assert _command(final_height).params["vx_cmd"] == pytest.approx(0.1)
+    for result in (descending, final_height):
+        assert result.detail["release_offset_active"] is True
+        assert result.detail["release_target_ex"] == pytest.approx(0.2)
+        assert result.detail["release_target_ey"] == pytest.approx(offset_ey)
+        assert result.detail["alignment_error_ex"] == pytest.approx(-0.1)
+        assert result.detail["alignment_error_ey"] == pytest.approx(0.1 - offset_ey)
+        assert not result.done
+    assert descending.detail["speed_control_phase"] == "descending"
+    assert _command(descending).params["vx_cmd"] == pytest.approx(offset_ey - 0.1)
+    assert _command(descending).params["vy_cmd"] == pytest.approx(-0.1)
+    assert _command(descending).params["vz_cmd"] == pytest.approx(0.2)
+    assert final_height.detail["speed_control_phase"] == "final_altitude"
+    assert _command(final_height).params["vx_cmd"] == pytest.approx((offset_ey - 0.1) * 0.5)
+    assert _command(final_height).params["vy_cmd"] == pytest.approx(-0.05)
     assert _command(final_height).params["vz_cmd"] == 0.0
 
+
+def test_matching_offset_during_descent_does_not_complete_early() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.2, "release_target_ey": 0.3})
+    for frame_id in range(1, 7):
+        result = action.update(_context(
+            frame_id=frame_id, detections=[_detection(0.0, 0.3)], altitude_m=3.0,
+        ))
+        assert result.detail["within_release_deadband"] is True
+        assert not result.done
+        assert _command(result).params["vx_cmd"] == pytest.approx(0.0)
+        assert _command(result).params["vy_cmd"] == pytest.approx(0.0)
+        assert _command(result).params["vz_cmd"] == pytest.approx(0.2)
 
 def test_final_altitude_stays_latched_through_a_small_height_rebound() -> None:
     action = AlignDescendAction()
@@ -232,6 +253,8 @@ def test_final_altitude_uses_the_finer_velocity_limits() -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.2,
+        "release_deadband_ex": 0.04,
+        "release_deadband_ey": 0.04,
         "kp_forward": 1.0,
         "kp_right": 1.0,
         "final_kp_forward": 0.5,
@@ -265,6 +288,8 @@ def test_bounded_integral_increases_persistent_close_range_correction(monkeypatc
     monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: next(clock))
     action.start({
         "target_altitude_m": 1.2,
+        "release_deadband_ex": 0.04,
+        "release_deadband_ey": 0.04,
         "kp_forward": 0.6,
         "kp_right": 0.6,
         "ki_forward": 0.25,
@@ -283,7 +308,7 @@ def test_bounded_integral_increases_persistent_close_range_correction(monkeypatc
     assert second.detail["integral_forward"] == pytest.approx(-0.04)
     assert second.detail["integral_right"] == pytest.approx(0.04)
 
-def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
+def test_low_altitude_succeeds_when_three_of_six_frames_are_aligned() -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.0,
@@ -291,7 +316,7 @@ def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
         "release_deadband_ey": 0.1,
     })
 
-    samples = [(0.0, 0.0), (0.2, 0.0), (0.05, -0.05), (0.0, 0.2), (0.2, 0.2)]
+    samples = [(0.2, 0.2), (0.0, 0.0), (0.05, -0.05), (0.0, 0.2), (0.2, 0.2), (0.0, 0.0)]
     results = [
         action.update(_context(
             frame_id=index,
@@ -301,17 +326,17 @@ def test_low_altitude_succeeds_when_two_of_five_frames_are_aligned() -> None:
         for index, (ex, ey) in enumerate(samples, start=1)
     ]
 
-    assert all(not result.done for result in results[:4])
+    assert all(not result.done for result in results[:5])
     assert results[-1].done and not results[-1].failed
     assert results[-1].reason == "alignment_confirmed"
-    assert results[-1].detail["alignment_hits"] == 2
+    assert results[-1].detail["alignment_hits"] == 3
     command = _command(results[-1])
     assert command.params["vx_cmd"] == 0.0
     assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
 
 
-def test_release_waits_for_measured_3d_speed_below_the_limit() -> None:
+def test_release_waits_for_measured_horizontal_speed_below_the_limit() -> None:
     action = AlignDescendAction()
     action.start({
         "target_altitude_m": 1.0,
@@ -325,10 +350,10 @@ def test_release_waits_for_measured_3d_speed_below_the_limit() -> None:
             altitude_m=1.0,
             velocity_mps=(0.1, 0.0, 0.0),
         ))
-        for index in range(1, 6)
+        for index in range(1, 7)
     ]
     released = action.update(_context(
-        frame_id=6,
+        frame_id=7,
         detections=[_detection(0.0, 0.0)],
         altitude_m=1.0,
         velocity_mps=(0.099, 0.0, 0.0),
@@ -347,6 +372,11 @@ def test_duplicate_frame_is_not_counted_twice() -> None:
     action = AlignDescendAction()
     action.start({"target_altitude_m": 1.0})
 
+    missed = action.update(_context(
+        frame_id=6, detections=[_detection(0.2, 0.2)], altitude_m=1.0,
+    ))
+    assert not missed.done
+
     for _ in range(5):
         result = action.update(_context(
             frame_id=7,
@@ -355,7 +385,7 @@ def test_duplicate_frame_is_not_counted_twice() -> None:
         ))
 
     assert not result.done
-    assert result.detail["alignment_window"] == [True]
+    assert result.detail["alignment_window"] == [False, True]
 
 
 def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
@@ -375,6 +405,42 @@ def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     assert command.params["yaw_mode"] == "condition_yaw_absolute"
     assert "yaw_hold_rad" not in command.params
     assert command.params["yaw_rate_rad_s"] == 0.0
+
+
+def test_landing_alignment_descends_after_target_loss_then_hands_off_to_land() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 0.3,
+        "descend_speed_mps": 0.2,
+        "continue_descending_on_target_loss": True,
+    })
+
+    initial = action.update(_context(
+        frame_id=1, detections=[], altitude_m=2.5,
+    ))
+    assert initial.reason == "target_not_found"
+    assert _command(initial).params["vz_cmd"] == 0.0
+
+    action.update(_context(
+        frame_id=2, detections=[_detection(0.1, 0.1)], altitude_m=2.0,
+    ))
+    lost = action.update(_context(
+        frame_id=3, detections=[], altitude_m=1.2,
+    ))
+    assert lost.reason == "target_lost_descending"
+    assert not lost.done and not lost.failed
+    assert lost.detail["target_acquired"] is True
+    command = _command(lost)
+    assert command.params["vx_cmd"] == command.params["vy_cmd"] == 0.0
+    assert command.params["vz_cmd"] == pytest.approx(0.2)
+
+    reached = action.update(_context(
+        frame_id=4, detections=[], altitude_m=0.3,
+    ))
+    assert reached.done and not reached.failed
+    assert reached.reason == "target_lost_at_final_altitude"
+    command = _command(reached)
+    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
 
 
 def test_initial_target_acquisition_timeout_completes_with_an_explicit_stop() -> None:
@@ -439,7 +505,7 @@ def test_yaw_is_latched_for_target_loss_even_if_context_heading_changes() -> Non
 def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:
     action = AlignDescendAction()
     action.start({"target_altitude_m": 1.0})
-    action.started_at -= 31.0
+    action.started_at -= 30.01
 
     result = action.update(_context(
         frame_id=1,
@@ -458,7 +524,7 @@ def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:
 def test_drop_timeout_can_complete_with_an_explicit_stop() -> None:
     action = AlignDescendAction()
     action.start({"target_altitude_m": 1.0, "complete_on_timeout": True})
-    action.started_at -= 31.0
+    action.started_at -= 30.01
 
     result = action.update(_context(
         frame_id=1,
@@ -483,3 +549,109 @@ def test_disabled_alignment_completes_without_waiting() -> None:
     assert result.done and not result.failed
     assert result.reason == "alignment_skipped"
     assert _command(result).params["vz_cmd"] == 0.0
+
+
+@pytest.mark.parametrize("vz", [0.2, -0.2, None, float("nan")])
+def test_release_ignores_vertical_velocity(vz: float | None) -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.2, "release_max_speed_mps": 0.08})
+    for frame_id in range(1, 7):
+        context = _context(
+            frame_id=frame_id, detections=[_detection(0.0, 0.0)],
+            altitude_m=1.2, velocity_mps=(0.03, 0.04, 0.0),
+        )
+        if vz is None:
+            context["drone"].pop("vz")
+        else:
+            context["drone"]["vz"] = vz
+        result = action.update(context)
+        assert result.detail["measured_speed_mps"] == pytest.approx(0.05)
+    assert result.done
+    assert result.reason == "alignment_confirmed"
+    assert _command(result).params["vz_cmd"] == 0.0
+
+
+@pytest.mark.parametrize("component", ["vx", "vy"])
+@pytest.mark.parametrize("value", [None, float("nan")])
+def test_missing_or_invalid_horizontal_velocity_blocks_release(component: str, value: float | None) -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.2})
+    for frame_id in range(1, 7):
+        context = _context(
+            frame_id=frame_id, detections=[_detection(0.0, 0.0)], altitude_m=1.2,
+        )
+        context["drone"][component] = value
+        result = action.update(context)
+    assert not result.done
+    assert result.reason == "waiting_for_release_speed"
+    assert result.detail["measured_speed_mps"] is None
+    assert result.detail["within_release_speed_limit"] is False
+
+
+@pytest.mark.parametrize("ex, speed", [(0.2, 0.0), (0.0, 0.08), (0.0, 0.1), (0.0, None)])
+def test_failed_arrival_check_uses_original_settling_path(ex: float, speed: float | None) -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.2, "final_settle_time_s": 0.3,
+        "release_deadband_ex": 0.04, "release_max_speed_mps": 0.08,
+    })
+    context = _context(
+        frame_id=1, detections=[_detection(ex, 0.0)], altitude_m=1.2,
+    )
+    context["drone"]["vx"] = speed
+    result = action.update(context)
+    assert not result.done
+    assert result.reason == "final_altitude_settling"
+    assert result.detail["final_settling"] is True
+    command = _command(result)
+    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
+
+
+@pytest.mark.parametrize("offset_ey", [0.3, 0.2])
+def test_aligned_arrival_still_waits_and_requires_final_height_vote(monkeypatch, offset_ey: float) -> None:
+    now = [100.0]
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: now[0])
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.2, "final_settle_time_s": 0.3,
+        "release_target_ey": offset_ey, "release_deadband_ex": 0.04,
+        "release_deadband_ey": 0.04, "release_max_speed_mps": 0.08,
+    })
+    arrived = action.update(_context(
+        frame_id=1, detections=[_detection(0.0, offset_ey)],
+        altitude_m=1.2, velocity_mps=(0.0, 0.0, 0.2),
+    ))
+    assert not arrived.done
+    assert arrived.reason == "final_altitude_settling"
+    assert _command(arrived).params["vx_cmd"] == 0.0
+    assert _command(arrived).params["vy_cmd"] == 0.0
+    assert _command(arrived).params["vz_cmd"] == 0.0
+    now[0] += 0.31
+    for frame_id in range(2, 8):
+        result = action.update(_context(
+            frame_id=frame_id, detections=[_detection(0.0, offset_ey)],
+            altitude_m=1.2, velocity_mps=(0.0, 0.0, 0.2),
+        ))
+        assert result.done is (frame_id == 7)
+    assert result.reason == "alignment_confirmed"
+
+
+@pytest.mark.parametrize("complete_on_timeout", [False, True])
+def test_timeout_boundary_is_thirty_seconds(monkeypatch, complete_on_timeout: bool) -> None:
+    clock = [100.0]
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: clock[0])
+    action = AlignDescendAction()
+    action.start({"complete_on_timeout": complete_on_timeout})
+    clock[0] = 129.99
+    pending = action.update(_context(
+        frame_id=1, detections=[_detection(0.5, 0.5)], altitude_m=2.0,
+    ))
+    assert not pending.done and not pending.failed
+    clock[0] = 130.0
+    expired = action.update(_context(
+        frame_id=2, detections=[_detection(0.5, 0.5)], altitude_m=2.0,
+    ))
+    assert expired.done is complete_on_timeout
+    assert expired.failed is (not complete_on_timeout)
+    command = _command(expired)
+    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0

@@ -54,7 +54,7 @@ def test_full_auto_mission_settles_after_takeoff_and_each_goto() -> None:
     mission = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")
     expected = {
         "takeoff_4_5m",
-        "goto_drop_center_4_5m",
+        "goto_drop_center_5m",
         "drop_1_approach",
         "drop_2_approach",
         "goto_recon_entry_4m",
@@ -87,13 +87,15 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
     assert [step["params"]["servo_outputs"] for step in releases] == [
         [{"channel": 8, "release_pwm": 1800, "hold_pwm": 1370}],
-        [{"channel": 9, "release_pwm": 1745, "hold_pwm": 1325}],
+        [{"channel": 9, "release_pwm": 1835, "hold_pwm": 1335}],
     ]
     for release in releases:
         index = steps.index(release)
         assert steps[index - 1]["name"] == "align_descend"
         assert steps[index + 1]["name"] == "goto_waypoint"
     aligns = [step for step in steps if step["name"] == "align_descend"]
+    assert all(step["params"]["target_altitude_m"] == 1.2 for step in aligns)
+    assert next(step for step in steps if step["name"] == "gps_fuse_views")["params"]["field_x_limit_m"] == 4.0
     assert all(
         "selection_mode" not in step["params"]
         and "target_valid" not in step["params"]
@@ -128,11 +130,11 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     )
     approaches = [step for step in steps if step.get("label") in {"drop_1_approach", "drop_2_approach"}]
     assert [step["params"]["altitude_m"] for step in approaches] == [3.0, 3.0]
-    drop_center = by_label["goto_drop_center_4_5m"]
+    drop_center = by_label["goto_drop_center_5m"]
     assert drop_center["name"] == "goto_waypoint"
     assert drop_center["params"]["x"] == 0
     assert drop_center["params"]["y"] == 32.5
-    assert drop_center["params"]["altitude_m"] == 4.5
+    assert drop_center["params"]["altitude_m"] == 5.0
     assert drop_center["params"]["require_velocity_valid"] is True
     assert drop_center["params"]["tolerance_xy_m"] == 0.30
     assert drop_center["params"]["tolerance_z_m"] == 0.30
@@ -153,6 +155,7 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
 
     fusion = by_label["drop_scan_fuse"]["params"]
     assert fusion["views"] == ["$drop_scan_view"]
+    assert fusion["field_x_limit_m"] == 4.0
     assert fusion["fusion"]["min_cluster_size"] == 1
     assert fusion["fusion"]["min_source_waypoints"] == 1
 
@@ -170,7 +173,7 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
         "fov_y_deg": 131.870643,
         "image_x_sign": 1,
         "image_y_sign": -1,
-        "ground_distance_scale": 1 / 3,
+        "ground_distance_scale": 0.21,
     }
 
     for step in steps:
@@ -182,7 +185,7 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
     releases = [step["params"] for step in steps if step["name"] == "payload_release"]
     assert releases[0]["servo_outputs"] == "$drop_targets.first_release_servo_outputs"
     assert releases[1]["servo_outputs"] == [
-        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
+        {"channel": 9, "release_pwm": 1835, "hold_pwm": 1335},
     ]
     assert [release["release_wait_s"] for release in releases] == [2, 2]
 
@@ -202,7 +205,7 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     }
     assert selector["single_target_servo_outputs"] == [
         {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
-        {"channel": 9, "release_pwm": 1745, "hold_pwm": 1325},
+        {"channel": 9, "release_pwm": 1835, "hold_pwm": 1335},
     ]
     assert selector["multi_target_first_servo_outputs"] == [
         {"channel": 8, "release_pwm": 1800, "hold_pwm": 1370},
@@ -212,24 +215,26 @@ def test_full_flow_plans_zero_one_or_two_target_release() -> None:
     assert by_label["drop_2_approach"]["params"]["target"] == "$drop_targets.target_slots.1"
     assert by_label["drop_1_align"]["params"]["enabled"] == "$drop_targets.first_alignment_enabled"
     assert by_label["drop_2_align"]["params"]["enabled"] == "$drop_targets.second_alignment_enabled"
-    assert by_label["drop_1_align"]["params"]["release_deadband_ex"] == 0.05
-    assert by_label["drop_1_align"]["params"]["release_deadband_ey"] == 0.05
-    assert by_label["drop_2_align"]["params"]["release_deadband_ex"] == 0.05
-    assert by_label["drop_2_align"]["params"]["release_deadband_ey"] == 0.05
+    assert by_label["drop_1_align"]["params"]["release_deadband_ex"] == 0.04
+    assert by_label["drop_1_align"]["params"]["release_deadband_ey"] == 0.04
+    assert by_label["drop_2_align"]["params"]["release_deadband_ex"] == 0.04
+    assert by_label["drop_2_align"]["params"]["release_deadband_ey"] == 0.04
     for label in ("drop_1_align", "drop_2_align"):
         params = by_label[label]["params"]
-        assert (params["kp_forward"], params["kp_right"]) == (0.35, 0.4)
-        assert (params["final_kp_forward"], params["final_kp_right"]) == (0.25, 0.25)
+        assert params["target_altitude_m"] == 1.1
+        assert (params["kp_forward"], params["kp_right"]) == (0.42, 0.42)
+        assert (params["final_kp_forward"], params["final_kp_right"]) == (0.2, 0.2)
         assert (params["ki_forward"], params["ki_right"]) == (0.0, 0.0)
         assert params["integral_limit"] == 0.0
         assert (params["max_vx_mps"], params["max_vy_mps"]) == (0.3, 0.3)
         assert (params["final_max_vx_mps"], params["final_max_vy_mps"]) == (0.15, 0.15)
-        assert params["release_max_speed_mps"] == 0.1
-        assert params["final_settle_time_s"] == 0.5
+        assert params["release_max_speed_mps"] == 0.08
+        assert params["final_settle_time_s"] == 0.3
     assert by_label["drop_1_align"]["params"]["release_target_ey"] == 0.3
-    assert by_label["drop_2_align"]["params"]["release_target_ey"] == -0.2
+    assert by_label["drop_2_align"]["params"]["release_target_ey"] == -0.05
     assert by_label["drop_2_release"]["params"]["enabled"] == "$drop_targets.second_release_enabled"
     assert by_label["drop_1_align"]["params"]["complete_on_timeout"] is True
     assert by_label["drop_2_align"]["params"]["complete_on_timeout"] is True
     assert by_label["final_land_align"]["params"]["complete_on_timeout"] is False
     assert by_label["final_land_align"]["params"]["target_acquisition_timeout_s"] == 2.0
+    assert by_label["final_land_align"]["params"]["continue_descending_on_target_loss"] is True

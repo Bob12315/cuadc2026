@@ -14,8 +14,8 @@ class AlignDescendAction(ActionModule):
     """Align to one tracked scene target until the low-altitude vote succeeds."""
 
     TIMEOUT_S = 30.0
-    ALIGNMENT_WINDOW_FRAMES = 5
-    ALIGNMENT_REQUIRED_FRAMES = 2
+    ALIGNMENT_WINDOW_FRAMES = 6
+    ALIGNMENT_REQUIRED_FRAMES = 3
     def __init__(self) -> None:
         self.reset()
     def start(self, params: dict[str, Any] | None = None) -> None:
@@ -27,6 +27,10 @@ class AlignDescendAction(ActionModule):
         self.target_acquisition_timeout_s = self._optional_positive(
             data.get("target_acquisition_timeout_s"),
             "target_acquisition_timeout_s",
+        )
+        self.continue_descending_on_target_loss = self._boolean(
+            data.get("continue_descending_on_target_loss", False),
+            "continue_descending_on_target_loss",
         )
         self.target_altitude_m = self._positive(data.get("target_altitude_m", 1.2), "target_altitude_m")
         self.descend_speed_mps = self._non_negative(data.get("descend_speed_mps", 0.2), "descend_speed_mps")
@@ -107,10 +111,8 @@ class AlignDescendAction(ActionModule):
         scene = data.get("scene")
         target = self._locked_scene_target(scene)
         if target is not None:
-            # This is deliberately latched: the optional acquisition timeout
-            # only decides whether to start visual descent at all.  A later
-            # one-frame YOLO dropout must retain the normal target-loss hold
-            # behavior instead of unexpectedly switching to LAND.
+            # The acquisition timeout only applies before the first target.
+            # A later dropout follows this action's target-loss policy.
             self.target_acquired = True
             self.target_acquisition_remaining_s = None
         elif self._target_acquisition_timed_out():
@@ -121,6 +123,8 @@ class AlignDescendAction(ActionModule):
                 altitude_m=altitude,
             )
 
+        speed_mps = self._speed_mps(data)
+
         # The vehicle's height controller may briefly rise after it starts
         # holding the final height.  Once reached, keep the final-height mode
         # latched for this action instead of reissuing a descent command.
@@ -130,34 +134,56 @@ class AlignDescendAction(ActionModule):
             and 0.0 < altitude <= self.target_altitude_m
         ):
             self.final_altitude_latched = True
+            self._clear_integral()
             if self.final_settle_time_s > 0.0:
                 self.final_settle_until = time.monotonic() + self.final_settle_time_s
-            self._clear_integral()
         if self._final_altitude_settling():
             return self._holding(
-                "final_altitude_settling", yaw_rad=yaw, altitude_m=altitude
+                "final_altitude_settling", yaw_rad=yaw, altitude_m=altitude,
+                speed_mps=speed_mps,
             )
-        speed_mps = self._speed_mps(data)
         if target is None or altitude is None or altitude <= 0.0:
             self._reset_integral()
             if self.final_altitude_latched:
                 self._record_alignment_frame(scene, False)
+            if (
+                target is None
+                and self.continue_descending_on_target_loss
+                and self.target_acquired
+                and altitude is not None
+                and altitude > 0.0
+            ):
+                if self.final_altitude_latched:
+                    return self._terminal(
+                        True, "target_lost_at_final_altitude", yaw_rad=yaw,
+                        altitude_m=altitude, speed_mps=speed_mps,
+                    )
+                vz = self.descend_speed_mps
+                reason = "target_lost_descending"
+                return ActionResult(
+                    effects=self._effects(0.0, 0.0, vz, yaw),
+                    reason=reason,
+                    detail=self._detail(
+                        reason, None, altitude, yaw, 0.0, 0.0, vz, False, speed_mps,
+                    ),
+                )
             reason = "target_not_found" if target is None else "altitude_unavailable"
             return self._holding(
                 reason, yaw_rad=yaw, altitude_m=altitude, speed_mps=speed_mps
             )
 
         ex, ey = target["ex"], target["ey"]
-        release_offset_active = self.final_altitude_latched
+        # Apply the configured image offset throughout alignment and descent.
+        release_offset_active = self.enabled
         release_target_ex = self.release_target_ex if release_offset_active else 0.0
         release_target_ey = self.release_target_ey if release_offset_active else 0.0
         alignment_ex = ex - release_target_ex
         alignment_ey = ey - release_target_ey
         self._update_integral(scene, alignment_ex, alignment_ey)
-        kp_forward = self.final_kp_forward if release_offset_active else self.kp_forward
-        kp_right = self.final_kp_right if release_offset_active else self.kp_right
-        max_vx_mps = self.final_max_vx_mps if release_offset_active else self.max_vx_mps
-        max_vy_mps = self.final_max_vy_mps if release_offset_active else self.max_vy_mps
+        kp_forward = self.final_kp_forward if self.final_altitude_latched else self.kp_forward
+        kp_right = self.final_kp_right if self.final_altitude_latched else self.kp_right
+        max_vx_mps = self.final_max_vx_mps if self.final_altitude_latched else self.max_vx_mps
+        max_vy_mps = self.final_max_vy_mps if self.final_altitude_latched else self.max_vy_mps
         vx = self._clamp(
             self.vx_sign * (kp_forward * alignment_ey + self.ki_forward * self.integral_forward),
             max_vx_mps,
@@ -208,12 +234,20 @@ class AlignDescendAction(ActionModule):
     def stop(self) -> None:
         self.stopped = True
 
+    def resume_after_pause(self, duration_s: float) -> None:
+        self.started_at += duration_s
+        if self.final_settle_until is not None:
+            self.final_settle_until += duration_s
+        if self.last_integral_at is not None:
+            self.last_integral_at += duration_s
+
     def reset(self) -> None:
         self.started = False
         self.stopped = False
         self.enabled = True
         self.complete_on_timeout = False
         self.target_acquisition_timeout_s: float | None = None
+        self.continue_descending_on_target_loss = False
         self.target_altitude_m = 1.2
         self.descend_speed_mps = 0.2
         self.release_deadband_ex = 0.1
@@ -412,12 +446,12 @@ class AlignDescendAction(ActionModule):
 
     @staticmethod
     def _speed_mps(data: dict[str, Any]) -> float | None:
-        """Return the measured 3D EKF velocity magnitude when it is complete."""
+        """Return measured horizontal EKF speed; vertical velocity is excluded."""
         drone = data.get("drone")
         source = drone if isinstance(drone, dict) else data
         components = [
             AlignDescendAction._optional_finite(source.get(name))
-            for name in ("vx", "vy", "vz")
+            for name in ("vx", "vy")
         ]
         if any(component is None for component in components):
             return None
@@ -513,19 +547,20 @@ class AlignDescendAction(ActionModule):
         aligned: bool,
         speed_mps: float | None,
     ) -> dict[str, Any]:
-        release_offset_active = self.final_altitude_latched
+        # Apply the configured image offset throughout alignment and descent.
+        release_offset_active = self.enabled
         release_target_ex = self.release_target_ex if release_offset_active else 0.0
         release_target_ey = self.release_target_ey if release_offset_active else 0.0
         alignment_error_ex = None if target is None else target["ex"] - release_target_ex
         alignment_error_ey = None if target is None else target["ey"] - release_target_ey
-        active_max_vx_mps = self.final_max_vx_mps if release_offset_active else self.max_vx_mps
-        active_max_vy_mps = self.final_max_vy_mps if release_offset_active else self.max_vy_mps
-        active_kp_forward = self.final_kp_forward if release_offset_active else self.kp_forward
-        active_kp_right = self.final_kp_right if release_offset_active else self.kp_right
+        active_max_vx_mps = self.final_max_vx_mps if self.final_altitude_latched else self.max_vx_mps
+        active_max_vy_mps = self.final_max_vy_mps if self.final_altitude_latched else self.max_vy_mps
+        active_kp_forward = self.final_kp_forward if self.final_altitude_latched else self.kp_forward
+        active_kp_right = self.final_kp_right if self.final_altitude_latched else self.kp_right
         return {
             "state": reason,
             "release_offset_active": release_offset_active,
-            "speed_control_phase": "final_altitude" if release_offset_active else "descending",
+            "speed_control_phase": "final_altitude" if self.final_altitude_latched else "descending",
             "final_altitude_latched": self.final_altitude_latched,
             "final_settle_time_s": self.final_settle_time_s,
             "final_settling": self.final_settle_remaining_s > 0.0,
@@ -542,6 +577,7 @@ class AlignDescendAction(ActionModule):
             "enabled": self.enabled,
             "complete_on_timeout": self.complete_on_timeout,
             "target_acquisition_timeout_s": self.target_acquisition_timeout_s,
+            "continue_descending_on_target_loss": self.continue_descending_on_target_loss,
             "target_acquired": self.target_acquired,
             "target_acquisition_remaining_s": self.target_acquisition_remaining_s,
             "target_lock_enabled": True,

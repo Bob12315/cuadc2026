@@ -211,6 +211,15 @@ class TakeoffAction(ActionModule):
     def stop(self) -> None:
         self.stopped = True
 
+    def resume_after_pause(self, duration_s: float) -> None:
+        for name in (
+            "started_monotonic_s", "takeoff_started_monotonic_s",
+            "yaw_alignment_started_monotonic_s", "completion_settle_started_monotonic_s",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                setattr(self, name, value + duration_s)
+
     def reset(self) -> None:
         self.phase = "idle"
         self.started = False

@@ -11,6 +11,9 @@ from .result import ActionResult
 class PayloadReleaseAction(ActionModule):
     # Payload release uses MAV_CMD_DO_SET_SERVO servo output numbers.
     # These are flight-controller SERVO outputs, not RC input channels.
+    # ACKs for the same MAV_CMD cannot be correlated by servo channel.  Leave
+    # more than the 500 ms ACK window plus 250 ms quarantine between outputs.
+    SERVO_INTER_COMMAND_GAP_S = 1.0
     def __init__(self) -> None:
         self.reset()
 
@@ -34,6 +37,8 @@ class PayloadReleaseAction(ActionModule):
         self.started = True
         self.state = "release" if self.enabled else "skipped"
         self.wait_updates = 0
+        self.output_index = 0
+        self.between_started_monotonic_s: float | None = None
         self.release_sent = False
         self.hold_sent = False
         self.done = False
@@ -69,7 +74,7 @@ class PayloadReleaseAction(ActionModule):
             detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
-                effects=ActionResult.typed(self._servo_actions("release")),
+                effects=ActionResult.typed(self._servo_actions("release", self.output_index)),
                 reason="release_sent",
                 detail=detail,
             )
@@ -88,23 +93,42 @@ class PayloadReleaseAction(ActionModule):
                     self.last_detail = detail
                     return ActionResult(effects=ActionResult.typed([]), reason="release_waiting", detail=detail)
 
+            last_output = self.output_index + 1 >= len(self.servo_outputs)
             self.hold_sent = True
-            self.state = "done"
-            self.done = True
+            self.state = "done" if last_output else "between_outputs"
+            self.done = last_output
+            if not last_output:
+                self.between_started_monotonic_s = time.monotonic()
             detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
-                effects=ActionResult.typed(self._servo_actions("hold")),
-                done=True,
-                reason="payload_released",
+                effects=ActionResult.typed(self._servo_actions("hold", self.output_index)),
+                done=last_output,
+                reason="payload_released" if last_output else "next_servo_pending",
                 detail=detail,
             )
+
+        if self.state == "between_outputs":
+            assert self.between_started_monotonic_s is not None
+            if time.monotonic() - self.between_started_monotonic_s < self.SERVO_INTER_COMMAND_GAP_S:
+                detail = self._detail(context)
+                self.last_detail = detail
+                return ActionResult(reason="next_servo_pending", detail=detail)
+            self.output_index += 1
+            self.state = "release"
+            return self.update(context)
 
         self.failed = True
         return ActionResult(failed=True, reason="invalid_payload_release_state", effects=ActionResult.typed([]), detail=self._detail())
 
     def stop(self) -> None:
         self.stopped = True
+
+    def resume_after_pause(self, duration_s: float) -> None:
+        if self.release_started_monotonic_s is not None:
+            self.release_started_monotonic_s += duration_s
+        if self.between_started_monotonic_s is not None:
+            self.between_started_monotonic_s += duration_s
 
     def reset(self) -> None:
         self.started = False
@@ -123,6 +147,8 @@ class PayloadReleaseAction(ActionModule):
         self.priority = 3
         self.key = ""
         self.wait_updates = 0
+        self.output_index = 0
+        self.between_started_monotonic_s: float | None = None
         self.release_sent = False
         self.hold_sent = False
         self.done = False
@@ -130,8 +156,9 @@ class PayloadReleaseAction(ActionModule):
         self.stopped = False
         self.last_detail: dict[str, Any] = {}
 
-    def _servo_actions(self, phase: str) -> list[dict[str, Any]]:
+    def _servo_actions(self, phase: str, index: int) -> list[dict[str, Any]]:
         pwm_name = f"{phase}_pwm"
+        item = self.servo_outputs[index]
         return [
             {
                 "action_type": "set_servo",
@@ -140,7 +167,6 @@ class PayloadReleaseAction(ActionModule):
                 "once": True,
                 "priority": self.priority,
             }
-            for item in self.servo_outputs
         ]
 
     def _detail(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -150,6 +176,7 @@ class PayloadReleaseAction(ActionModule):
             "channels": list(self.channels),
             "servo_channels": list(self.channels),
             "servo_outputs": [dict(item) for item in self.servo_outputs],
+            "output_index": self.output_index,
             "channel_semantics": (
                 "servo output channel for MAV_CMD_DO_SET_SERVO, not RC input channel"
             ),

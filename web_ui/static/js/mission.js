@@ -18,7 +18,7 @@
   }
 
   function statusLabel(status) {
-    return {pending: "待执行", running: "执行中", done: "已完成", failed: "失败",
+    return {pending: "待执行", running: "执行中", paused: "已暂停", done: "已完成", failed: "失败",
       skipped: "已跳过", continued: "已继续", stopped: "已停止"}[status] || status;
   }
 

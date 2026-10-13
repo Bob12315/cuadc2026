@@ -44,13 +44,13 @@
     };
   }
 
-  function _finalHeightAlignmentTarget(payload) {
+  function _alignmentTarget(payload) {
     var actionLab = (payload || {}).action_lab || {};
     var status = actionLab.status || actionLab;
     var result = status.last_result || {};
     var detail = result.detail || {};
     if (!status.running || status.action_name !== "align_descend") return null;
-    if (detail.speed_control_phase !== "final_altitude" || detail.release_offset_active !== true) return null;
+    if (detail.release_offset_active !== true) return null;
     var ex = Number(detail.release_target_ex);
     var ey = Number(detail.release_target_ey);
     if (!Number.isFinite(ex) || !Number.isFinite(ey) || Math.abs(ex) > 1 || Math.abs(ey) > 1) return null;
@@ -75,7 +75,7 @@
     context.clearRect(0, 0, rect.width, rect.height);
 
     var scene = (payload || {}).scene || {};
-    var target = _finalHeightAlignmentTarget(payload);
+    var target = _alignmentTarget(payload);
     if (!target || !Number(scene.image_width) || !Number(scene.image_height)) return;
 
     var bounds = _shownVideoBounds(scene, rect);

@@ -231,6 +231,7 @@
           "$drop_scan_view_3",
           "$drop_scan_view_4"
         ],
+        "field_x_limit_m": 4.0,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -432,8 +433,8 @@
         "servo_outputs": [
           {
             "channel": 9,
-            "release_pwm": 1745,
-            "hold_pwm": 1325
+            "release_pwm": 1835,
+            "hold_pwm": 1335
           }
         ],
         "priority": 3,

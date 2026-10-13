@@ -8,8 +8,8 @@
 系统需要在同一次任务中完成：
 
 1. 建立并冻结比赛 FIELD 坐标；
-2. 起飞后在投放区多视角定位目标；
-3. 按识别数量生成投放计划：零目标在投放区中心投放，一个目标对准后同时投放两枚载荷，
+2. 起飞后在投放区中心采集一次视野并定位目标；
+3. 按识别数量生成投放计划：零目标在投放区中心投放，一个目标对准后依次投放两枚载荷，
    两个及以上目标选择最高分的两个并依次对准投放；
 4. 前往侦察区扫描危险标识并生成排名；
 5. 返回起飞点，执行视觉辅助降落和 LAND 兜底。
@@ -23,15 +23,15 @@ FIELD 坐标中 `+Y` 为场地前方、`+X` 为场地右方，`altitude_m` 向�
 
 ```text
 takeoff
-→ 4 × (goto_waypoint → gps_capture_view)
+→ goto_waypoint (drop centre, 5 m) → gps_capture_view
 → gps_fuse_views
 → select_drop_targets
 → change_speed (1 m/s)
-→ 2 × (goto_waypoint → align_descend(nearest image centre) → payload_release → goto_waypoint climb)
+→ 2 × (goto_waypoint → align_descend(visual target tracking) → payload_release → goto_waypoint climb)
 → change_speed (2 m/s)
-→ change_speed (1 m/s)
-→ goto_waypoint (recon entry)
-→ 5 × goto_waypoint
+→ goto_waypoint (recon entry, 4 m)
+→ change_speed (0.2 m/s)
+→ 6 × goto_waypoint (recon, 3 m)
 → change_speed (2 m/s)
 → goto_waypoint (return home)
 → goto_waypoint (descend home)
@@ -42,6 +42,17 @@ takeoff
 速度切换必须显式使用 `change_speed` Action。`goto_waypoint` 中的到点速度参数是完成
 判据，不是飞行限速。
 
+### 侦察区六点航迹
+
+完整 v2 在侦察区的两排各设置左、中、右三个 FIELD 航点，两排分别位于 `Y=56 m` 和 `Y=59 m`，
+每排 `X=-3, 0, 3 m`，六点高度均为 3 m。执行顺序为近排左→中→右，再到远排右→中→左：
+
+`(-3,56) → (0,56) → (3,56) → (3,59) → (0,59) → (-3,59)`。
+
+入口仍为 `(-3,56)`、4 m，到达后降为侦察速度 0.2 m/s。六点到点误差为水平 0.4 m、
+高度 0.3 m，继承 Action 默认的 1 秒稳停，不要求速度门槛。原中心点 `(0,57.5)` 已移除；结束后
+恢复 2 m/s，返回 `(0,0)`、4 m。此修改仅适用于完整 v2，`recon_gps.json` 分项模板保持原航迹。
+
 ### 展开的 v2 Action 清单与失败策略
 
 下表的序号就是 JSON 内的执行序。三个正式比赛模板的每一步都显式使用
@@ -51,7 +62,7 @@ takeoff
 | # | label | Action | 失败策略 |
 | ---: | --- | --- | --- |
 | 1 | `takeoff_4_5m` | `takeoff` | `continue` |
-| 2 | `goto_drop_center_4_5m` | `goto_waypoint` | `continue` |
+| 2 | `goto_drop_center_5m` | `goto_waypoint` | `continue` |
 | 3 | `drop_scan_capture` | `gps_capture_view` | `continue` |
 | 4 | `drop_scan_fuse` | `gps_fuse_views` | `continue` |
 | 5 | `select_gps_drop_targets` | `select_drop_targets` | `continue` |
@@ -62,17 +73,17 @@ takeoff
 | 10 | `drop_1_climb` | `goto_waypoint` | `continue` |
 | 11 | `drop_2_approach` | `goto_waypoint` | `continue` |
 | 12 | `drop_2_align` | `align_descend` | `continue` |
-| 13 | `drop_2_release` | `payload_release`（前方 SERVO9 1745→1325） | `continue` |
+| 13 | `drop_2_release` | `payload_release`（前方 SERVO9 1835→1335） | `continue` |
 | 14 | `drop_2_climb` | `goto_waypoint` | `continue` |
 | 15 | `restore_transition_speed_2mps` | `change_speed` | `continue` |
-| 16 | `recon_speed_1mps` | `change_speed` | `continue` |
-| 17 | `goto_recon_entry_4m` | `goto_waypoint` | `continue` |
-| 18–22 | `recon_scan_goto_1..5` | `goto_waypoint` | `continue` |
-| 23 | `restore_return_speed_2mps` | `change_speed` | `continue` |
-| 24 | `return_home_gps` | `goto_waypoint` | `continue` |
-| 25 | `descend_home_2_5m` | `goto_waypoint` | `continue` |
-| 26 | `final_land_align` | `align_descend` | `continue` |
-| 27 | `land_home` | `land` | `continue` |
+| 16 | `goto_recon_entry_4m` | `goto_waypoint` | `continue` |
+| 17 | `recon_speed_1mps`（实际 0.2 m/s） | `change_speed` | `continue` |
+| 18–23 | `recon_scan_goto_1..6` | `goto_waypoint` | `continue` |
+| 24 | `restore_return_speed_2mps` | `change_speed` | `continue` |
+| 25 | `return_home_gps` | `goto_waypoint` | `continue` |
+| 26 | `descend_home_2_5m` | `goto_waypoint` | `continue` |
+| 27 | `final_land_align` | `align_descend` | `continue` |
+| 28 | `land_home` | `land` | `continue` |
 
 ## 模板定位
 
@@ -112,11 +123,11 @@ Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但�
 | 载荷 | 位置 | 自动任务 SERVO 输出 | PWM 时序（锁→投→锁） | Gazebo detach topic |
 | --- | --- | --- | --- | --- |
 | bottle1 / `payload_1` | 后方；遥控器 -26（锁）、60（投） | SERVO8 | 1370 → 1800 → 1370 | `/cuadc2026/payload/bottle1/detach` |
-| bottle2 / `payload_2` | 前方；遥控器 -35（锁）、49（投） | SERVO9 | 1325 → 1745 → 1325 | `/cuadc2026/payload/bottle2/detach` |
+| bottle2 / `payload_2` | 前方；遥控器 -35（锁）、49（投） | SERVO9 | 1335 → 1835 → 1335 | `/cuadc2026/payload/bottle2/detach` |
 
 遥控器位置按 `-100 = 1000`、`100 = 2000` 线性换算为 PWM；它们用于校准记录，绝不是
 Mission 参数。`payload_release` 只经 `set_servo` 发送 `MAV_CMD_DO_SET_SERVO`；
-`config/safety.yaml` 只白名单化 SERVO8 的 1370--1800 与 SERVO9 的 1325--1745 PWM，禁止
+`config/safety.yaml` 只白名单化 SERVO8 的 1370--1800 与 SERVO9 的 1335--1835 PWM，禁止
 RC override。
 
 ## 侦察、对准、投放原子 Action
@@ -126,16 +137,19 @@ RC override。
 
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
-| 投放区中心单视角粗定位 | 飞至 FIELD `(0, 32.5)`、4.5 m 后运行一次 `gps_capture_view`，从当前广角 YOLO `scene.detections` 与捕获时 GPS/yaw/高度计算每个筒的粗 GPS；随后 `gps_fuse_views` 与 `select_drop_targets` 按筒类别得分和空间去重选择最多两个目标。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
-| 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
-| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放同时控制后方 SERVO8、前方 SERVO9；两个目标时分别控制 SERVO8、SERVO9，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
+| 投放区中心单视角粗定位 | 飞至 FIELD `(0, 32.5)`、5 m 后运行一次 `gps_capture_view`，从当前广角 YOLO `scene.detections` 与捕获时 GPS/yaw/高度计算每个筒的粗 GPS；随后 `gps_fuse_views` 与 `select_drop_targets` 按筒类别得分和空间去重选择最多两个目标。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
+| 最近目标对准下降 | 飞机先到融合 GPS 点上方 3 m，融合 GPS 只用于导航。`align_descend` 首先从 `scene.detections` 获取画面中心附近的目标，按 track ID 和图像位置连续性跟踪，同时根据投放偏置修正水平位置并下降。零目标中心投放会跳过该步骤。 | 到目标高度后，连续 6 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`；投放对准达到 30 s 时发零速并以 `alignment_timeout_accepted` 完成。 | 投放对准超时按成功继续投放；最终返航视觉对准仍保持超时失败。 |
+| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。零目标或一个目标时第一次投放依次控制后方 SERVO8、前方 SERVO9，两路之间间隔 1 s；两个目标时分别控制 SERVO8、SERVO9，第二投放步骤在目标不足时安全跳过。 | 首 tick 为 `release_sent`，最终为 `payload_released`；跳过时为 `payload_release_skipped`。`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
 连续的 `align_descend` 在停止、超时或丢失视觉时都会发送显式零速，
 并清除旧连续命令；这不能替代飞手或地面站接管。
 
-投放对准段的有效参数是：目标高度 1.2 m、下降率 0.30 m/s、对准范围
-`|ex|/|ey| ≤ 0.02`、水平 P 增益 0.3 且限幅 0.25 m/s。返航视觉下降段高度为 0.3 m，
-水平限幅及对准范围为 0.3。超时固定为 30 s，5 帧窗口和 3 帧命中数固定在 Action 中。
+完整流程投放对准段的有效参数是：目标高度 1.1 m、下降率 0.2 m/s、相对投放偏置的
+对准范围 `|ex - release_target_ex|/|ey - release_target_ey| ≤ 0.04`；两路投放的 `ey` 偏置
+分别为 0.3 和 -0.05。下降阶段水平 P 增益为 0.42，限幅 0.3 m/s；最终高度 P 增益为 0.2，
+限幅 0.15 m/s，稳停 0.3 s，并要求水平速度低于 0.08 m/s。积分校正关闭。
+返航视觉下降段目标高度为 0.3 m，对准范围为 0.3，稳停 0.5 s。
+超时固定为 30 s，6 帧窗口和 3 帧命中数固定在 Action 中。
 只有投放对准把超时视作完成；最终返航视觉对准显式设置为超时失败。
 
 ## 运行架构
@@ -149,6 +163,7 @@ Action Mission JSON
   → Action.update()
   → ActionResult
   → ActionDispatcher
+  → ActionSafetyPipeline
   → LinkManager
   → Flight Controller / YOLO / Servo
 ```
@@ -177,7 +192,7 @@ select_drop_targets save_as drop_targets
 
 goto_waypoint（融合目标 GPS 上方）
   → align_descend
-  → 每个新画面选择中心最近检测
+  → 按 track ID 和图像位置连续性跟踪视觉目标
   → MissionOrchestrator 清理连续命令并保持位置
   → payload_release save_as drop_release_1..2
 ```
@@ -186,8 +201,8 @@ goto_waypoint（融合目标 GPS 上方）
 并放宽画面边缘过滤。粗 GPS 只用于区分场上筒、以 1.0 m 空间去重避免同一筒占用两个
 槽位，以及导航至目标附近；广角边缘误差由后续近距离视觉对准投放处理。融合输出携带的
 总权重会参与同类别目标的稳定排序。零目标时 `target_slots[0]` 是 FIELD `(0, 32.5)` 的
-中心回退点，飞机在 2.5 m 高度直接同时投放两枚载荷。一个目标时第一槽使用融合 GPS，
-并在一次对准后同时投放两枚载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定
+中心回退点，飞机在 3 m 高度直接依次投放两枚载荷。一个目标时第一槽使用融合 GPS，
+并在一次对准后依次投放两枚载荷；两个目标时两个槽分别执行。`align_descend` 不消费固定
 track，只使用飞机到达位置后的当前画面；投放计划只控制该步骤是否执行。
 
 参数引用支持字典键和列表索引，例如：

@@ -38,8 +38,8 @@ payload:
       min_pwm: 1370
       max_pwm: 1800
     - servo_output: 9
-      min_pwm: 1325
-      max_pwm: 1745
+      min_pwm: 1335
+      max_pwm: 1835
 
 sources:
   sitl:

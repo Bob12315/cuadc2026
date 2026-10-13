@@ -165,6 +165,10 @@ class ActionRunner:
             ActionResult(done=True, reason=reason),
         )
 
+    def resume_after_pause(self, duration_s: float) -> None:
+        if self.state == "running" and self.current_action is not None:
+            self.current_action.resume_after_pause(duration_s)
+
     def reset(self) -> ActionResult:
         reset_error: Exception | None = None
         try:
