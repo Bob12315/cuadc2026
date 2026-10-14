@@ -17,11 +17,9 @@ from telemetry_link.models import ActionCommand, ActionType, ControlCommand, Con
 from telemetry_link.state_cache import StateCache
 from telemetry_link.telemetry_receiver import TelemetryReceiver
 
-
 from contracts.platform.vehicle_commands import BodyVelocity
 from telemetry_link.command_broker import CommandBroker
 from telemetry_link.mavlink_command_adapter import MavlinkCommandAdapter
-
 
 def _attach_broker(runtime):
     context = runtime.command_context
@@ -36,7 +34,6 @@ def _attach_broker(runtime):
     runtime.command_adapter = MavlinkCommandAdapter(broker, SimpleNamespace(notify=lambda: None),
         source=runtime.name, session_id=lambda: "session", context=context)
     return broker, sent
-
 
 def _endpoint(name: str) -> EndpointConfig:
     return EndpointConfig(
@@ -54,14 +51,12 @@ def _endpoint(name: str) -> EndpointConfig:
         eth_port=14550,
     )
 
-
 def _config(**overrides) -> TelemetryConfig:
     data = dict(
         data_source="dual",
         active_source="sitl",
         sitl=_endpoint("sitl"),
         real=_endpoint("real"),
-
 
         heartbeat_timeout_sec=0.05,
         rx_timeout_sec=0.05,
@@ -80,7 +75,6 @@ def _config(**overrides) -> TelemetryConfig:
     data.update(overrides)
     return TelemetryConfig(**data)
 
-
 def test_switch_active_source_cancels_motion_on_all_sources() -> None:
     manager = LinkManager(_config())
     pending = []
@@ -94,7 +88,6 @@ def test_switch_active_source_cancels_motion_on_all_sources() -> None:
         assert broker.status(receipt.command_id).queue_state.value == "CANCELLED"
         assert broker.drain_one() is None
         assert not any(isinstance(value.payload, BodyVelocity) for value in sent)
-
 
 def test_switch_active_source_updates_shared_attitude_publisher_session() -> None:
     manager = LinkManager(_config(attitude_udp_enabled=True))
@@ -110,7 +103,6 @@ def test_switch_active_source_updates_shared_attitude_publisher_session() -> Non
         for runtime in manager.runtimes.values()
     )
 
-
 def test_virtual_nadir_attitude_interval_is_forced_to_at_least_30_hz() -> None:
     cfg = _config(data_source="sitl", active_source="sitl", attitude_udp_enabled=True,
                   attitude_udp_rate_hz=30, message_interval_hz={"ATTITUDE": 10})
@@ -122,7 +114,6 @@ def test_virtual_nadir_attitude_interval_is_forced_to_at_least_30_hz() -> None:
     assert len(sent) == 1
     assert sent[0].action_type == ActionType.REQUEST_MESSAGE_INTERVAL
     assert sent[0].params == {"message_name": "ATTITUDE", "rate_hz": 30}
-
 
 class _FailingClient:
     connection_string = "fake"
@@ -142,7 +133,6 @@ class _FailingClient:
 
     def close(self) -> None:
         self.closed = True
-
 
 def test_source_runtime_start_returns_while_connect_retries_in_background() -> None:
     client = _FailingClient()
@@ -167,7 +157,6 @@ def test_source_runtime_start_returns_while_connect_retries_in_background() -> N
     finally:
         runtime.stop()
 
-
 def test_source_runtime_stop_workers_cancels_pending_motion_and_actions() -> None:
     cfg = _config(data_source="sitl", active_source="sitl")
     runtime = SourceRuntime("sitl", cfg.sitl, cfg, StateCache(.05, .05),
@@ -181,7 +170,6 @@ def test_source_runtime_stop_workers_cancels_pending_motion_and_actions() -> Non
     assert broker.drain_one() is None
     assert runtime.command_adapter is None and runtime.command_broker is None
     assert sent == []  # no previously transmitted motion required a stop
-
 
 def test_stale_link_monitor_cancels_pending_commands_and_closes_client() -> None:
     class StopAfterFirstWait:
@@ -202,7 +190,6 @@ def test_stale_link_monitor_cancels_pending_commands_and_closes_client() -> None
     assert broker.status(control.command_id).queue_state.value == "CANCELLED"
     assert broker.drain_one() is None and sent == []
 
-
 def test_load_config_rejects_quoted_false_bool(tmp_path, monkeypatch) -> None:
     path = tmp_path / "telemetry.yaml"
     path.write_text(
@@ -213,7 +200,6 @@ sitl:
   connection_type: tcp
 real:
   connection_type: tcp
-
 
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
@@ -230,14 +216,12 @@ log_level: INFO
     with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
         load_config_file(path)
 
-
 def test_load_config_file_uses_tracked_real_root_profile() -> None:
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
 
     assert cfg.data_source == "real"
     assert cfg.active_source == "real"
     assert cfg.real.connection_type == "eth"
-
 
 def test_load_config_file_uses_explicit_sitl_profile() -> None:
     from scripts.config.render_profile import render
@@ -248,7 +232,6 @@ def test_load_config_file_uses_explicit_sitl_profile() -> None:
     assert cfg.data_source == "sitl"
     assert cfg.active_source == "sitl"
     assert cfg.sitl.connection_type == "udp"
-
 
 def test_load_config_parses_eth_endpoint(tmp_path, monkeypatch) -> None:
     path = tmp_path / "telemetry.yaml"
@@ -263,7 +246,6 @@ real:
   eth_mode: udpout
   eth_host: 192.168.144.10
   eth_port: 14550
-
 
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
@@ -283,7 +265,6 @@ log_level: INFO
     assert cfg.real.eth_mode == "udpout"
     assert cfg.real.eth_host == "192.168.144.10"
     assert cfg.real.eth_port == 14550
-
 
 def test_mavlink_client_uses_eth_udp_connection_string(monkeypatch) -> None:
     calls = []
@@ -305,7 +286,6 @@ def test_mavlink_client_uses_eth_udp_connection_string(monkeypatch) -> None:
     assert client.connection_string == "udpin:0.0.0.0:14550"
     assert calls == [("udpin:0.0.0.0:14550", None)]
 
-
 def test_mavlink_client_uses_eth_tcp_connection_string(monkeypatch) -> None:
     calls = []
 
@@ -326,7 +306,6 @@ def test_mavlink_client_uses_eth_tcp_connection_string(monkeypatch) -> None:
     assert client.connection_string == "tcp:192.168.144.10:5760"
     assert calls == [("tcp:192.168.144.10:5760", None)]
 
-
 def test_load_config_rejects_invalid_bool_string(tmp_path, monkeypatch) -> None:
     path = tmp_path / "telemetry.yaml"
     path.write_text(
@@ -337,7 +316,6 @@ sitl:
   connection_type: tcp
 real:
   connection_type: tcp
-
 
 heartbeat_timeout_sec: 0.05
 rx_timeout_sec: 0.05
@@ -353,7 +331,6 @@ log_level: INFO
 
     with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
         load_config_file(path)
-
 
 def test_local_position_ned_updates_raw_local_position_without_overwriting_relative_altitude() -> None:
     cache = StateCache(heartbeat_timeout_sec=1.0, rx_timeout_sec=1.0)
@@ -378,7 +355,6 @@ def test_local_position_ned_updates_raw_local_position_without_overwriting_relat
     assert state.local_z == pytest.approx(-3.75)
     assert state.relative_altitude == pytest.approx(4.2)
 
-
 class _FakeMav:
     def __init__(self) -> None:
         self.command_long_calls = []
@@ -393,7 +369,6 @@ class _FakeMav:
         self.local_position_calls.append(args)
         self.events.append(("local_position", args))
 
-
 class _FakeMaster:
     target_system = 1
     target_component = 2
@@ -401,14 +376,12 @@ class _FakeMaster:
     def __init__(self) -> None:
         self.mav = _FakeMav()
 
-
 class _RawMessageClient:
     def __init__(self) -> None:
         self.master = _FakeMaster()
 
     def send_raw_message(self, callback) -> None:
         callback(self.master)
-
 
 def _encoder_with_fake_client() -> tuple[MavlinkCommandEncoder, _RawMessageClient]:
     client = _RawMessageClient()
@@ -418,7 +391,6 @@ def _encoder_with_fake_client() -> tuple[MavlinkCommandEncoder, _RawMessageClien
         cfg=_config(data_source="sitl", active_source="sitl"),
     )
     return sender, client
-
 
 def test_command_encoder_set_servo_uses_mav_cmd_do_set_servo() -> None:
     sender, client = _encoder_with_fake_client()
@@ -433,22 +405,6 @@ def test_command_encoder_set_servo_uses_mav_cmd_do_set_servo() -> None:
     call = client.master.mav.command_long_calls[-1]
     assert call[2] == mavutil.mavlink.MAV_CMD_DO_SET_SERVO
     assert call[4:11] == (9.0, 1900.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-
-def test_command_encoder_set_relay_uses_mav_cmd_do_set_relay() -> None:
-    sender, client = _encoder_with_fake_client()
-
-    sender._send_action(
-        ActionCommand(
-            action_type=ActionType.SET_RELAY,
-            params={"relay_id": 0, "state": True},
-        )
-    )
-
-    call = client.master.mav.command_long_calls[-1]
-    assert call[2] == mavutil.mavlink.MAV_CMD_DO_SET_RELAY
-    assert call[4:11] == (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
 
 def test_command_encoder_velocity_ignores_yaw_axis() -> None:
     sender, client = _encoder_with_fake_client()
@@ -469,7 +425,6 @@ def test_command_encoder_velocity_ignores_yaw_axis() -> None:
     assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
     assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
     assert call[8:11] == (1.0, 2.0, 3.0)
-
 
 def test_command_encoder_velocity_with_yaw_holds_yaw_axis() -> None:
     sender, client = _encoder_with_fake_client()
@@ -492,7 +447,6 @@ def test_command_encoder_velocity_with_yaw_holds_yaw_axis() -> None:
     assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
     assert call[8:11] == (1.0, 2.0, 3.0)
     assert call[14] == pytest.approx(1.25)
-
 
 def test_command_encoder_body_velocity_with_zero_yaw_rate_uses_mask_1479() -> None:
     sender, client = _encoder_with_fake_client()
@@ -535,7 +489,6 @@ def test_command_encoder_body_velocity_with_zero_yaw_rate_uses_mask_1479() -> No
     assert call[14] == pytest.approx(0.0)
     assert call[15] == pytest.approx(0.0)
 
-
 def test_command_encoder_rejects_velocity_with_yaw_and_yaw_rate() -> None:
     sender, client = _encoder_with_fake_client()
     with pytest.raises(ValueError, match="both yaw and yaw_rate"):
@@ -543,7 +496,6 @@ def test_command_encoder_rejects_velocity_with_yaw_and_yaw_rate() -> None:
             client.master,
             ControlCommand(command_type=ControlType.VELOCITY, yaw=1.0, yaw_rate=0.0, frame=8),
         )
-
 
 def test_command_encoder_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
     sender, client = _encoder_with_fake_client()
@@ -558,7 +510,6 @@ def test_command_encoder_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
     assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
     assert not type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
     assert call[-1] == pytest.approx(0.5)
-
 
 def test_command_encoder_local_position_can_hold_yaw() -> None:
     sender, client = _encoder_with_fake_client()
@@ -578,7 +529,4 @@ def test_command_encoder_local_position_can_hold_yaw() -> None:
     assert call[5:8] == (1.0, 2.0, -3.0)
     assert call[14] == pytest.approx(0.75)
 
-
 # ── SITL 前安全修复：CommandQueue / MavlinkCommandEncoder 原子 stop-and-clear ────
-
-

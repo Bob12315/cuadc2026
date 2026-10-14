@@ -48,7 +48,7 @@ These are transport entry-points behind the formal dispatch and safety gates.
 
 ### 2. Advanced / debug interfaces
 
-These remain available at the transport layer for adapters, service plumbing
+The interfaces below remain available at the transport layer for adapters, service plumbing
 and tests. Their existence does not authorize a new direct Action/Mission
 call path; Web UI remains the formal human-operation entry.
 
@@ -57,19 +57,15 @@ call path; Web UI remains the formal human-operation entry.
 | `disarm(priority=1)` | Disarm motors; not a current ActionDispatcher request type |
 | `goto_local_ned(x_north_m, y_east_m, z_down_m, yaw_rad=None, priority=4)` | LOCAL_NED position wrapper; current `goto_waypoint` does not use it |
 | `local_position(x, y, z, frame, yaw=None, priority=4)` | Raw position; prefer the semantic wrapper for LOCAL_NED |
-| `reposition(lat, lon, alt, ground_speed_mps=-1.0, yaw_deg=None, priority=4)` | `MAV_CMD_DO_REPOSITION` |
 | `send_gimbal_angle(pitch, yaw, roll=0.0, mount_mode=None, priority=5)` | Absolute angle; pitch/yaw in degrees |
 | `send_gimbal_rate(yaw_rate, pitch_rate, yaw_lock=False, gimbal_device_id=0)` | Gimbal rate control |
-| `set_home_current(priority=4)` | Set home to current position |
-| `set_home_location(lat, lon, alt, priority=4)` | Set home to location |
-| `set_roi_location(lat, lon, alt, priority=4)` | Point camera at location |
-| `roi_none(gimbal_device_id=0, priority=4)` | Clear ROI |
-| `gimbal_manager_configure(gimbal_device_id=0, primary_sysid=None, primary_compid=None, priority=4)` | Mount configure |
-| `request_message_interval(message_name, rate_hz, priority=6)` | Telemetry rate |
-| `set_relay(relay_id, state, priority=3)` | Relay control |
 | `send_yaw_rate_command(yaw_rate, frame=1)` | Yaw-only rate |
 
-### 3. Deprecated / restricted interfaces
+The old terminal-only Home/ROI/reposition/relay and public message-interval
+facades have been deleted. They had no production consumers and no typed broker
+payload. Startup telemetry subscription remains a private runtime operation.
+
+### 3. Restricted interfaces
 
 **Do not call these from Action or Mission code.**  
 Queue submission methods exist for internal adapter plumbing and tests.

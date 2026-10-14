@@ -69,9 +69,8 @@ change_speed Action → ActionRuntimeService → ActionDispatcher
 
 `goto_waypoint.max_horizontal_speed_mps` 是到点速度门槛，不是飞行限速。需要限定
 任务阶段地速时，必须显式编排 `change_speed` Action，并在阶段结束或失败恢复路径中
-恢复后续阶段速度。底层编码器包含在 Guided 从速度切回位置时先发送位置目标、再重发
-`MAV_CMD_DO_CHANGE_SPEED`，但当前 production v2 adapter 不保留航点的速度覆盖，
-`MavlinkEnvelopeWriter` 重建参数时设置 `_speed_overrides=[]`，因此这项重发不是当前保证。
+恢复后续阶段速度。旧位置切换后的自动速度重发逻辑已随旧发送链删除；当前唯一 typed
+发送后端只执行显式 `change_speed` 请求，不会隐式附加或重发航点速度覆盖。
 阶段速度在控制模式切换后的保持仍须 SITL/实机验证，并作为发送链缺口单独修复；
 不能由编码器的能力推断它已生效。Action 不得直接调用 `LinkManager` 或 pymavlink。
 

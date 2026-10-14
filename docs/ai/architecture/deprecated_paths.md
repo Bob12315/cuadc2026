@@ -31,6 +31,7 @@ CF-21/CF-25/CF-26 静止切换与零命中证明，仍属于 production rollback
 2026-10-13 清理：旧 telemetry `CommandSender` 线程、`CommandQueue`、one-shot shadow、
 文本 dispatcher、独立 telemetry/fusion debug 和 `5010` 状态广播已删除；当前保留唯一
 `CommandBrokerWorker → MavlinkEnvelopeWriter → MavlinkCommandEncoder` 发送后端。
-旧 writer/UI/state-UDP 配置键会被拒绝。profile 保存入口及复制旧 Mission 配置的逻辑也已删除。
+旧 writer/UI/state-UDP 配置键会被拒绝。未接入 typed broker、无生产调用的 Home/ROI/reposition/relay
+终端接口和相应编码分支也已删除；启动时私有遥测订阅仍保留。profile 保存入口及复制旧 Mission 配置的逻辑也已删除。
 
 退役实现与历史行为锁不进入生产导入、正式 validator 或 pytest 主线。

@@ -55,7 +55,7 @@ def test_clear_navigation_queue_fallback_without_stop_and_clear() -> None:
     # Fallback: no stop_and_clear → stop_body is called, but NOT followed by clear
     assert "stop_body_velocity" in calls
     assert "clear_continuous_commands" not in calls, (
-        "fallback must NOT immediately clear STOP; leave it queued for CommandSender"
+        "fallback must NOT immediately clear the adapter's pending STOP"
     )
     assert "clear_pending_local_position_actions" in calls
 

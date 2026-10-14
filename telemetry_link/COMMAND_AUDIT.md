@@ -30,8 +30,8 @@ LocalPositionTarget 使用 LOCAL_NED，单位米，z 正向向下；当前 FIELD
 两类位置目标的可选 yaw 均为 rad。
 
 ChangeSpeed 使用 `MAV_CMD_DO_CHANGE_SPEED`，typed writer 当前固定地速类型 1。
-底层编码器虽保留位置切换后的速度重发能力，v2 adapter/typed envelope 未携带速度覆盖，
-writer 传入 `_speed_overrides=[]`；不能声称当前模式切换后一定会重发阶段速度。
+旧位置切换后的自动速度重发逻辑已删除。当前 typed 后端只执行显式 ChangeSpeed 请求，
+不会隐式附加或重发航点速度覆盖；不能声称当前模式切换后一定会恢复阶段速度。
 此缺口须单独验证和修复，不在旧链路删除任务中顺带更改发送行为。
 
 ## 一次性命令

@@ -21,15 +21,9 @@ class ActionType(str, Enum):
     GIMBAL_ANGLE = "gimbal_angle"
     CONDITION_YAW = "condition_yaw"
     CHANGE_SPEED = "change_speed"
-    SET_HOME = "set_home"
     GLOBAL_GOTO = "global_goto"
     LOCAL_POSITION = "local_position"
-    REPOSITION = "reposition"
-    SET_ROI_LOCATION = "set_roi_location"
-    ROI_NONE = "roi_none"
-    GIMBAL_MANAGER_CONFIGURE = "gimbal_manager_configure"
     SET_SERVO = "set_servo"
-    SET_RELAY = "set_relay"
 
 
 @dataclass(slots=True)

@@ -45,3 +45,19 @@ def test_unconnected_transport_rejects_commands_without_a_fallback_queue(monkeyp
 def test_removed_payload_interface_cannot_be_selected() -> None:
     assert not hasattr(LinkManager, "release_payload")
     assert "release_payload" not in {kind.value for kind in ActionType}
+
+
+@pytest.mark.parametrize("method", [
+    "set_home_current", "set_home_location", "reposition", "set_roi_location",
+    "roi_none", "gimbal_manager_configure", "set_relay", "request_message_interval",
+])
+def test_retired_debug_only_transport_interfaces_are_absent(method: str) -> None:
+    assert not hasattr(LinkManager, method)
+
+
+@pytest.mark.parametrize("kind", [
+    "set_home", "reposition", "set_roi_location", "roi_none",
+    "gimbal_manager_configure", "set_relay",
+])
+def test_retired_debug_only_action_types_are_absent(kind: str) -> None:
+    assert kind not in {item.value for item in ActionType}

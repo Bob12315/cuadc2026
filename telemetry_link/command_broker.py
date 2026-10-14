@@ -457,5 +457,6 @@ class CommandBrokerWorker(threading.Thread):
     def close(self, timeout_s: float = 1.0) -> bool:
         self._stop_event.set()
         self._wake.set()
-        self.join(timeout_s)
+        if self.ident is not None and self is not threading.current_thread():
+            self.join(timeout_s)
         return not self.is_alive()

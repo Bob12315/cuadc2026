@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import uuid
+from typing import Any
 from pymavlink import mavutil
 from dataclasses import dataclass
 from contracts.platform.vehicle_state import LinkControlSnapshot, SourceSwitchReceipt
@@ -39,7 +40,6 @@ except ImportError:  # pragma: no cover - supports direct script execution
     from contracts.platform.vehicle_commands import (BarrierDisposition, CancelRequest, CancelScope,
         CancellationReceipt, CommandSubmissionReceipt, SubmissionState, VehicleCommandEnvelope)
 
-
 def _cancel_runtime(runtime, scope: CancelScope, **kwargs):
     broker = runtime.command_broker
     if broker is None:
@@ -52,7 +52,6 @@ def _cancel_runtime(runtime, scope: CancelScope, **kwargs):
         expected_link_session_id=link_session_id,
         **kwargs,
     ))
-
 
 @dataclass(slots=True)
 class SourceRuntime:
@@ -194,7 +193,8 @@ class SourceRuntime:
                 return
             except Exception as exc:
                 logger.warning("source=%s reconnect failed: %s", self.name, exc)
-                self.client.close()
+                self._stop_workers(close_client=True)
+                self.state_cache.mark_disconnected(str(exc))
                 if self.stop_event.wait(self.cfg.reconnect_interval_sec):
                     return
 
@@ -209,7 +209,8 @@ class SourceRuntime:
                 self.broker_worker = None
             self.worker_stop_event.set()
             if self.receiver is not None:
-                self.receiver.join(timeout=1.0)
+                if self.receiver.ident is not None:
+                    self.receiver.join(timeout=1.0)
                 self.receiver = None
             self.encoder = None
             self.command_adapter = None
@@ -258,7 +259,6 @@ class SourceRuntime:
             params={"message_name": message_name, "rate_hz": rate_hz},
             priority=20,
 
-
             created_at=time.time(),
         )
         if self.encoder is not None:
@@ -288,7 +288,6 @@ class SourceRuntime:
                 # ACK key. ACK/timeout closes the slot but starts quarantine;
                 # do not register the next request until that protection ends.
                 self.stop_event.wait(self.cfg.ack_quarantine_ms / 1000.0)
-
 
 class LinkManager:
     """
@@ -633,7 +632,6 @@ class LinkManager:
                 params={"mode": mode},
                 priority=priority,
 
-
                 created_at=time.time(),
             )
         )
@@ -644,7 +642,6 @@ class LinkManager:
                 action_type=ActionType.ARM,
                 priority=priority,
 
-
                 created_at=time.time(),
             )
         )
@@ -654,7 +651,6 @@ class LinkManager:
             ActionCommand(
                 action_type=ActionType.DISARM,
                 priority=priority,
-
 
                 created_at=time.time(),
             )
@@ -667,7 +663,6 @@ class LinkManager:
                 params={"altitude_m": float(altitude_m)},
                 priority=priority,
 
-
                 created_at=time.time(),
             )
         )
@@ -678,7 +673,6 @@ class LinkManager:
             ActionCommand(
                 action_type=ActionType.LAND,
                 priority=priority,
-
 
                 created_at=time.time(),
             )
@@ -703,7 +697,6 @@ class LinkManager:
                 },
                 priority=priority,
 
-
                 created_at=time.time(),
             )
         )
@@ -714,31 +707,6 @@ class LinkManager:
                 action_type=ActionType.CHANGE_SPEED,
                 params={"speed_mps": float(speed_mps), "speed_type": int(speed_type)},
                 priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def set_home_current(self, priority: int = 4) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.SET_HOME,
-                params={"current": True, "lat": 0.0, "lon": 0.0, "alt": 0.0},
-                priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def set_home_location(self, lat: float, lon: float, alt: float, priority: int = 4) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.SET_HOME,
-                params={"current": False, "lat": float(lat), "lon": float(lon), "alt": float(alt)},
-                priority=priority,
-
 
                 created_at=time.time(),
             )
@@ -765,7 +733,6 @@ class LinkManager:
                 params=params,
                 priority=priority,
 
-
                 created_at=time.time(),
             )
         )
@@ -788,79 +755,6 @@ class LinkManager:
                 params=params,
                 priority=priority,
 
-
-                created_at=time.time(),
-            )
-        )
-
-    def reposition(
-        self,
-        lat: float,
-        lon: float,
-        alt: float,
-        ground_speed_mps: float = -1.0,
-        yaw_deg: float | None = None,
-        priority: int = 4,
-    ) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.REPOSITION,
-                params={
-                    "lat": float(lat),
-                    "lon": float(lon),
-                    "alt": float(alt),
-                    "ground_speed_mps": float(ground_speed_mps),
-                    "yaw_deg": yaw_deg,
-                },
-                priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def set_roi_location(self, lat: float, lon: float, alt: float, priority: int = 4) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.SET_ROI_LOCATION,
-                params={"lat": float(lat), "lon": float(lon), "alt": float(alt)},
-                priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def roi_none(self, gimbal_device_id: int = 0, priority: int = 4) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.ROI_NONE,
-                params={"gimbal_device_id": int(gimbal_device_id)},
-                priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def gimbal_manager_configure(
-        self,
-        gimbal_device_id: int = 0,
-        primary_sysid: int | None = None,
-        primary_compid: int | None = None,
-        priority: int = 4,
-    ) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.GIMBAL_MANAGER_CONFIGURE,
-                params={
-                    "gimbal_device_id": int(gimbal_device_id),
-                    "primary_sysid": primary_sysid,
-                    "primary_compid": primary_compid,
-                },
-                priority=priority,
-
-
                 created_at=time.time(),
             )
         )
@@ -877,31 +771,6 @@ class LinkManager:
                 action_type=ActionType.SET_SERVO,
                 params={"channel": int(channel), "pwm": int(pwm)},
                 priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def set_relay(self, relay_id: int, state: bool, priority: int = 3) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.SET_RELAY,
-                params={"relay_id": int(relay_id), "state": bool(state)},
-                priority=priority,
-
-
-                created_at=time.time(),
-            )
-        )
-
-    def request_message_interval(self, message_name: str, rate_hz: float, priority: int = 6) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.REQUEST_MESSAGE_INTERVAL,
-                params={"message_name": str(message_name), "rate_hz": float(rate_hz)},
-                priority=priority,
-
 
                 created_at=time.time(),
             )
@@ -925,7 +794,6 @@ class LinkManager:
                     "mount_mode": int(self.cfg.gimbal_mount_mode if mount_mode is None else mount_mode),
                 },
                 priority=priority,
-
 
                 created_at=time.time(),
             )
@@ -999,12 +867,10 @@ class LinkManager:
         self.stop_control(frame=BODY_NED)
 
     def stop_body_velocity_and_clear(self) -> None:
-        """Queue an explicit zero-velocity barrier before later actions.
+        """Cancel the body stream and request the broker's trusted zero barrier.
 
-        The barrier lives in the one-shot action queue at safety priority 0,
-        so navigation/land handlers cannot erase it while clearing the latest
-        continuous sample.  The sender transmits zero BODY_NED velocity and
-        then clears any continuous sample that raced with the transition.
+        The cancellation receipt records whether the barrier was transmitted;
+        there is no fallback queue when the command backend is unavailable.
         """
         runtime = self._active_runtime()
         if runtime.command_broker is not None:

@@ -18,7 +18,6 @@ except ImportError:  # pragma: no cover - supports direct script execution
     from models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
     from state_cache import StateCache
 
-
 class MavlinkCommandEncoder:
     """Synchronous wire encoding; CommandBrokerWorker owns command scheduling."""
     def __init__(
@@ -157,29 +156,6 @@ class MavlinkCommandEncoder:
                         ],
                     )
                 )
-            elif command.action_type == ActionType.SET_HOME:
-                self.logger.info(
-                    "sending action command=set_home current=%s lat=%.7f lon=%.7f alt=%.2f",
-                    bool(command.params["current"]),
-                    float(command.params["lat"]),
-                    float(command.params["lon"]),
-                    float(command.params["alt"]),
-                )
-                self.client.send_raw_message(
-                    lambda master: self._command_long(
-                        master,
-                        mavutil.mavlink.MAV_CMD_DO_SET_HOME,
-                        [
-                            1.0 if bool(command.params["current"]) else 0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            float(command.params["lat"]),
-                            float(command.params["lon"]),
-                            float(command.params["alt"]),
-                        ],
-                    )
-                )
             elif command.action_type == ActionType.GLOBAL_GOTO:
                 goto_yaw = command.params.get("yaw")
                 self.logger.info(
@@ -206,38 +182,6 @@ class MavlinkCommandEncoder:
                 self.client.send_raw_message(
                     lambda master: self._send_local_position(master, command)
                 )
-            elif command.action_type == ActionType.REPOSITION:
-                self.logger.info(
-                    "sending action command=reposition lat=%.7f lon=%.7f alt=%.2f speed=%.2f yaw=%s",
-                    float(command.params["lat"]),
-                    float(command.params["lon"]),
-                    float(command.params["alt"]),
-                    float(command.params["ground_speed_mps"]),
-                    "nan" if command.params.get("yaw_deg") is None else f"{float(command.params['yaw_deg']):.2f}",
-                )
-                self.client.send_raw_message(lambda master: self._send_reposition(master, command))
-            elif command.action_type == ActionType.SET_ROI_LOCATION:
-                self.logger.info(
-                    "sending action command=set_roi_location lat=%.7f lon=%.7f alt=%.2f",
-                    float(command.params["lat"]),
-                    float(command.params["lon"]),
-                    float(command.params["alt"]),
-                )
-                self.client.send_raw_message(lambda master: self._send_roi_location(master, command))
-            elif command.action_type == ActionType.ROI_NONE:
-                self.logger.info(
-                    "sending action command=roi_none gimbal_device_id=%s",
-                    int(command.params.get("gimbal_device_id", 0)),
-                )
-                self.client.send_raw_message(lambda master: self._send_roi_none(master, command))
-            elif command.action_type == ActionType.GIMBAL_MANAGER_CONFIGURE:
-                self.logger.info(
-                    "sending action command=gimbal_manager_configure gimbal_device_id=%s primary_sysid=%s primary_compid=%s",
-                    int(command.params.get("gimbal_device_id", 0)),
-                    command.params.get("primary_sysid"),
-                    command.params.get("primary_compid"),
-                )
-                self.client.send_raw_message(lambda master: self._send_gimbal_manager_configure(master, command))
             elif command.action_type == ActionType.SET_SERVO:
                 self.logger.info(
                     "sending action command=set_servo channel=%s pwm=%s",
@@ -245,13 +189,6 @@ class MavlinkCommandEncoder:
                     int(command.params["pwm"]),
                 )
                 self.client.send_raw_message(lambda master: self._send_set_servo(master, command))
-            elif command.action_type == ActionType.SET_RELAY:
-                self.logger.info(
-                    "sending action command=set_relay relay_id=%s state=%s",
-                    int(command.params["relay_id"]),
-                    bool(command.params["state"]),
-                )
-                self.client.send_raw_message(lambda master: self._send_set_relay(master, command))
             elif command.action_type == ActionType.GIMBAL_ANGLE:
                 self.logger.info(
                     "sending action command=gimbal_angle pitch=%.2f yaw=%.2f roll=%.2f mount_mode=%s",
@@ -443,79 +380,6 @@ class MavlinkCommandEncoder:
             0.0,
         )
 
-    def _send_reposition(self, master, command: ActionCommand) -> None:
-        yaw_deg = command.params.get("yaw_deg")
-        master.mav.command_int_send(
-            master.target_system,
-            master.target_component,
-            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            mavutil.mavlink.MAV_CMD_DO_REPOSITION,
-            0,
-            0,
-            float(command.params["ground_speed_mps"]),
-            0.0,
-            0.0,
-            float("nan") if yaw_deg is None else float(yaw_deg),
-            int(round(float(command.params["lat"]) * 1e7)),
-            int(round(float(command.params["lon"]) * 1e7)),
-            float(command.params["alt"]),
-        )
-
-    def _send_roi_location(self, master, command: ActionCommand) -> None:
-        master.mav.command_int_send(
-            master.target_system,
-            master.target_component,
-            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            mavutil.mavlink.MAV_CMD_DO_SET_ROI_LOCATION,
-            0,
-            0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            int(round(float(command.params["lat"]) * 1e7)),
-            int(round(float(command.params["lon"]) * 1e7)),
-            float(command.params["alt"]),
-        )
-
-    def _send_roi_none(self, master, command: ActionCommand) -> None:
-        master.mav.command_int_send(
-            master.target_system,
-            master.target_component,
-            mavutil.mavlink.MAV_FRAME_GLOBAL,
-            mavutil.mavlink.MAV_CMD_DO_SET_ROI_NONE,
-            0,
-            0,
-            float(command.params.get("gimbal_device_id", 0)),
-            0.0,
-            0.0,
-            0.0,
-            0,
-            0,
-            0.0,
-        )
-
-    def _send_gimbal_manager_configure(self, master, command: ActionCommand) -> None:
-        primary_sysid = command.params.get("primary_sysid")
-        primary_compid = command.params.get("primary_compid")
-        if primary_sysid is None:
-            primary_sysid = getattr(master, "source_system", getattr(master.mav, "srcSystem", 255))
-        if primary_compid is None:
-            primary_compid = getattr(master, "source_component", getattr(master.mav, "srcComponent", 0))
-        self._command_long(
-            master,
-            mavutil.mavlink.MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE,
-            [
-                float(primary_sysid),
-                float(primary_compid),
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                float(command.params.get("gimbal_device_id", 0)),
-            ],
-        )
-
     def _send_set_servo(self, master, command: ActionCommand) -> None:
         self.logger.info(
             "sending COMMAND_LONG MAV_CMD_DO_SET_SERVO command=183 param1_channel=%s param2_pwm=%s",
@@ -528,21 +392,6 @@ class MavlinkCommandEncoder:
             [
                 float(command.params["channel"]),
                 float(command.params["pwm"]),
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ],
-        )
-
-    def _send_set_relay(self, master, command: ActionCommand) -> None:
-        self._command_long(
-            master,
-            mavutil.mavlink.MAV_CMD_DO_SET_RELAY,
-            [
-                float(command.params["relay_id"]),
-                1.0 if bool(command.params["state"]) else 0.0,
                 0.0,
                 0.0,
                 0.0,
