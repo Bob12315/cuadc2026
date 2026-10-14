@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(dirname "$(dirname "${SCRIPT_PATH}")")"
+
+# Relative overrides are always relative to this repository, not the caller's cwd.
+# Resolve before passing paths to terminals, whose working directory may differ.
+resolve_repo_path() {
+  local path="$1"
+  if [[ "${path}" != /* ]]; then
+    path="${REPO_ROOT}/${path}"
+  fi
+  realpath -m -- "${path}"
+}
+
 # The team SITL workstation forwards MAVLink telemetry and video to the RK3588
 # at this address by default. Override GCS_HOST for another ground station.
 GCS_HOST="${GCS_HOST:-10.101.31.108}"
@@ -9,16 +22,15 @@ MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 MAVPROXY_STREAMRATE="${MAVPROXY_STREAMRATE:-50}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"
 PAYLOAD_MAVLINK_PORT="${PAYLOAD_MAVLINK_PORT:-14551}"
-ARDUPILOT_DIR="${ARDUPILOT_DIR:-/home/level6/ardupilot}"
-GZ_REPO_DIR="${GZ_REPO_DIR:-/home/level6/gz_ws/src/ardupilot_gazebo}"
-GZ_PARAM_FILE="${GZ_PARAM_FILE:-/home/level6/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm}"
-GZ_WORLD="${GZ_WORLD:-/home/level6/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf}"
+ARDUPILOT_DIR="$(resolve_repo_path "${ARDUPILOT_DIR:-../ardupilot}")"
+GZ_REPO_DIR="$(resolve_repo_path "${GZ_REPO_DIR:-../gz_ws/src/ardupilot_gazebo}")"
+GZ_PARAM_FILE="$(resolve_repo_path "${GZ_PARAM_FILE:-${GZ_REPO_DIR}/config/gazebo-cuadc2026-fixed-camera.parm}")"
+GZ_WORLD="$(resolve_repo_path "${GZ_WORLD:-${GZ_REPO_DIR}/worlds/cuadc2026_rescue.sdf}")"
 CAMERA_STREAM_TOPIC="${CAMERA_STREAM_TOPIC:-/world/cuadc2026_rescue/model/iris_cuadc2026_fixed_down_camera/model/gimbal/link/pitch_link/sensor/camera/image/enable_streaming}"
-PAYLOAD_BRIDGE="${PAYLOAD_BRIDGE:-${GZ_REPO_DIR}/tools/cuadc2026/payload_release_bridge.py}"
-PAYLOAD_CONFIG="${PAYLOAD_CONFIG:-${GZ_REPO_DIR}/config/cuadc2026-payload-release.yaml}"
+PAYLOAD_BRIDGE="$(resolve_repo_path "${PAYLOAD_BRIDGE:-${GZ_REPO_DIR}/tools/cuadc2026/payload_release_bridge.py}")"
+PAYLOAD_CONFIG="$(resolve_repo_path "${PAYLOAD_CONFIG:-${GZ_REPO_DIR}/config/cuadc2026-payload-release.yaml}")"
 CAMERA_STREAM_DELAY="${CAMERA_STREAM_DELAY:-10}"
 TERMINAL_HOLD="${TERMINAL_HOLD:-1}"
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 export TERMINAL_HOLD
 
 if [[ "${1:-}" == "--tab-runner" ]]; then
@@ -65,17 +77,41 @@ open_terminal() {
 }
 
 gz_command=(gz sim -v4 -r "${GZ_WORLD}")
+SITL_RUNTIME_DIR="${REPO_ROOT}/runtime/sitl/iris-gimbal"
+mkdir -p -- "${SITL_RUNTIME_DIR}"
+sitl_args=(
+  ./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON
+  --use-dir "${SITL_RUNTIME_DIR}"
+  "--add-param-file=${GZ_PARAM_FILE}" --console
+  "--mavproxy-args=--streamrate=${MAVPROXY_STREAMRATE}"
+  "--out=udp:${GCS_HOST}:${MAVLINK_PORT}"
+  "--out=udp:127.0.0.1:${PAYLOAD_MAVLINK_PORT}"
+)
+printf -v sitl_shell '%q ' "${sitl_args[@]}"
+printf -v ardupilot_shell_dir '%q' "${ARDUPILOT_DIR}"
 arducopter_command=(
   bash -lc
-  "cd '${ARDUPILOT_DIR}' && ./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON --add-param-file='${GZ_PARAM_FILE}' --console --mavproxy-args='--streamrate=${MAVPROXY_STREAMRATE}' --out=udp:${GCS_HOST}:${MAVLINK_PORT} --out=udp:127.0.0.1:${PAYLOAD_MAVLINK_PORT}"
+  "cd ${ardupilot_shell_dir} && ${sitl_shell}"
 )
+printf -v payload_shell '%q ' python3 "${PAYLOAD_BRIDGE}" --config "${PAYLOAD_CONFIG}"
 payload_bridge_command=(
   bash -lc
-  "python3 '${PAYLOAD_BRIDGE}' --config '${PAYLOAD_CONFIG}'"
+  "${payload_shell}"
 )
+printf -v relay_wait_shell '%q ' echo "Waiting ${CAMERA_STREAM_DELAY}s for Gazebo to start..."
+printf -v relay_sleep_shell '%q ' sleep "${CAMERA_STREAM_DELAY}"
+printf -v relay_topic_shell '%q ' gz topic -t "${CAMERA_STREAM_TOPIC}" -m gz.msgs.Boolean -p 'data: 1'
+relay_args=(
+  gst-launch-1.0 -v udpsrc "port=${VIDEO_PORT}"
+  caps=application/x-rtp,media=video,encoding-name=H264,payload=96
+  '!' rtpjitterbuffer latency=0 drop-on-latency=true '!' rtph264depay
+  '!' h264parse '!' rtph264pay config-interval=1 pt=96
+  '!' udpsink "host=${VIDEO_HOST}" "port=${VIDEO_PORT}"
+)
+printf -v relay_stream_shell '%q ' "${relay_args[@]}"
 relay_command=(
   bash -lc
-  "echo 'Waiting ${CAMERA_STREAM_DELAY}s for Gazebo to start...' && sleep '${CAMERA_STREAM_DELAY}' && gz topic -t '${CAMERA_STREAM_TOPIC}' -m gz.msgs.Boolean -p 'data: 1' && gst-launch-1.0 -v udpsrc port=${VIDEO_PORT} caps='application/x-rtp,media=video,encoding-name=H264,payload=96' ! rtpjitterbuffer latency=0 drop-on-latency=true ! rtph264depay ! h264parse ! rtph264pay config-interval=1 pt=96 ! udpsink host=${VIDEO_HOST} port=${VIDEO_PORT}"
+  "${relay_wait_shell} && ${relay_sleep_shell} && ${relay_topic_shell} && ${relay_stream_shell}"
 )
 
 if command -v gnome-terminal >/dev/null 2>&1; then

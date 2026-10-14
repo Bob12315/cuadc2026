@@ -11,7 +11,7 @@
 
 | 项目 | 实际结果 |
 | --- | --- |
-| 工作区 | `C:\Users\24184\Desktop\project\uav_system` |
+| 工作区 | `.`（本仓库根目录；当时使用 Windows 工作区，具体绝对位置不作为配置） |
 | 源码身份 | 目录没有 `.git`；按源码快照处理，没有可信 revision、branch、`git status` 或 `git diff` 基线 |
 | 平台 | Windows 11 `10.0.26200`，AMD64 |
 | 可用 Python | Codex bundled CPython 3.12.13，MSC v.1944 64 bit |

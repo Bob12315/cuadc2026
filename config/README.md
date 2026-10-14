@@ -85,3 +85,14 @@ bash scripts/healthcheck/check_rk3588.sh
 
 日志、录像、SITL 状态和 blackbox 数据属于 `runtime/`，不得写入配置目录或提交为
 正式配置。
+
+## 文件路径与本机文件
+
+YOLO 的模型、输出视频、录像目录和本地视频输入路径以所选 `yolo.yaml` 的目录为基准；
+app 的 audit/security/blackbox 输出路径以仓库根目录为基准。配置中使用相对路径，
+运行时解析出实际位置。`/dev/...` 设备名和视频流 URL 保持原有语义。
+systemd 模板保留占位符，安装脚本根据当前仓库及环境生成路径，不写死开发者的家目录。
+
+`.env`、`config/*.local.yaml`、本地备份、环境和地形缓存已在 `.gitignore` 中排除。
+本机配置需通过相应 `--app-config`、`--telemetry-config` 或 YOLO 的 `--config` 显式指定；
+程序不会自动读取 `.env` 或合并 `*.local.yaml`。

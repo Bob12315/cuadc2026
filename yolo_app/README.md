@@ -114,6 +114,8 @@ python -m yolo_app.main
 显示、录像、视频源、UDP 目的地址和 Web stream 均由 `config/yolo.yaml` 管理。运行
 录像属于产物，应写入 `runtime/`；当前 `recording_dir: ../runtime/videos` 相对于配置文件
 目录解析，指向仓库的 `runtime/videos/`。
+未配置录像目录时也使用 `../runtime/videos`。模型、输出视频和本地视频输入同样按配置文件
+目录解析；UDP 端口、相机设备名、视频流 URL 和 GStreamer pipeline 不作为相对文件路径处理。
 
 ## UDP 输出
 

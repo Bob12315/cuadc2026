@@ -634,7 +634,7 @@ environment-rk3588-yolo.yml  # Linux ARM64 RK3588 专用
 - [x] YOLO 安装器必须同时检查 ARM64 和 RK3588/RKNN runtime 条件，不能只检查 `aarch64`；
 - [x] App 安装失败时必须给出缺失组件和架构信息；
 - [x] 所有路径从仓库根目录、当前 Conda prefix 或配置解析，禁止硬编码用户名和
-      `/home/level6`；
+      开发者家目录；
 - [x] systemd 模板使用解析到的 Conda Python，不默认假设 `~/anaconda3`；
 - [x] 提供通用 App healthcheck 和独立 RK3588 hardware healthcheck；
 - [x] 通用 App healthcheck 不检查 NPU、摄像头或 RKNNLite；

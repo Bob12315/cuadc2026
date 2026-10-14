@@ -1,2 +1,0 @@
-This file was created to refresh the contributors graph.
-Timestamp: 2026-08-27

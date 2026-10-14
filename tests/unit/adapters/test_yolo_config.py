@@ -65,6 +65,54 @@ def test_load_config_resolves_paths_relative_to_yaml(tmp_path: Path, monkeypatch
     assert Path(cfg.recording_dir).name == "uav_recordings"
 
 
+@pytest.mark.parametrize("recording_dir", [None, "../runtime/videos"])
+def test_recording_directory_is_relative_to_config_not_launch_directory(
+    tmp_path: Path, monkeypatch, recording_dir: str | None,
+) -> None:
+    data = _config()
+    if recording_dir is None:
+        data.pop("recording_dir")
+    else:
+        data["recording_dir"] = recording_dir
+    path = _write_config(tmp_path, data)
+    launch_dir = tmp_path / "other" / "launch"
+    launch_dir.mkdir(parents=True)
+    monkeypatch.chdir(launch_dir)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    assert load_config().recording_dir == str(tmp_path / "runtime" / "videos")
+
+
+def test_local_video_file_is_relative_to_config_not_launch_directory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    data = _config()
+    data["source"] = "../runtime/videos/input clip.mp4"
+    path = _write_config(tmp_path, data)
+    launch_dir = tmp_path / "other"
+    launch_dir.mkdir()
+    monkeypatch.chdir(launch_dir)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    assert load_config().source == str(tmp_path / "runtime" / "videos" / "input clip.mp4")
+
+
+@pytest.mark.parametrize("source", [
+    "5600", "/dev/video0", "/dev/v4l/by-id/camera-video-index0",
+    "rtsp://camera.local/live", "file:///external/input.mp4",
+    "videotestsrc ! videoconvert ! appsink",
+])
+def test_video_source_paths_preserve_devices_ports_streams_and_pipelines(
+    tmp_path: Path, monkeypatch, source: str,
+) -> None:
+    data = _config()
+    data["source"] = source
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    assert load_config().source == source
+
+
 def test_load_config_accepts_three_rknn_inference_workers(tmp_path: Path, monkeypatch) -> None:
     data = _config()
     data["inference_workers"] = 3

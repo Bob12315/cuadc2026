@@ -314,6 +314,18 @@ def _resolve_config_path(value: Any, config_path: str) -> str:
     return str((Path(config_path).resolve().parent / path).resolve())
 
 
+def _resolve_video_source(value: Any, config_path: str) -> str:
+    source = _expand_user_path(value)
+    pipeline_markers = (
+        " ! ", "appsink", "udpsrc", "rtspsrc", "rtph264depay",
+        "avdec_h264", "videoconvert",
+    )
+    if (source.isdigit() or "://" in source
+            or any(marker in source.lower() for marker in pipeline_markers)):
+        return source
+    return _resolve_config_path(source, config_path)
+
+
 def load_config() -> AppConfig:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -347,7 +359,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         model_path=_resolve_config_path(merged["model_path"], args.config),
         inference_workers=inference_workers,
-        source=_expand_user_path(merged["source"]),
+        source=_resolve_video_source(merged["source"], args.config),
         conf_thres=float(merged["conf_thres"]),
         iou_thres=float(merged["iou_thres"]),
         classes=list(merged.get("classes", [])),
@@ -387,6 +399,8 @@ def load_config() -> AppConfig:
         web_stream_max_fps=float(web_stream_config.get("max_fps", 20.0)),
         web_stream_width=int(web_stream_config.get("width", 0)),
         web_stream_height=int(web_stream_config.get("height", 0)),
-        recording_dir=_expand_user_path(merged.get("recording_dir", "~/uav_recordings")),
+        recording_dir=_resolve_config_path(
+            merged.get("recording_dir", "../runtime/videos"), args.config
+        ),
         virtual_nadir=_virtual_nadir_config(merged.get("virtual_nadir")),
     )

@@ -35,3 +35,35 @@ action调试.md
 # Local runtime state: SITL EEPROM, MAVLink logs, blackbox data, and videos.
 runtime/*
 !runtime/.gitkeep
+
+# Local environments, credentials, editor state and temporary copies.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+.venv/
+venv/
+node_modules/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.swp
+*.swo
+config/*.local.yaml
+config/*.local.yml
+
+# Generated SITL terrain and contributor-refresh marker; CI remains tracked.
+terrain/
+/.github/refresh-contributors.txt
+
+# This reviewed README demo is a repository asset, not a runtime recording.
+!docs/assets/readme/flight-demo.mp4

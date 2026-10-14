@@ -63,6 +63,19 @@ bash scripts/deploy/install_systemd_user_services.sh
 bash scripts/deploy/install_systemd_user_services.sh --enable-now
 ```
 
+## SITL 外部仓库路径
+
+`run_iris_gimbal_sitl.sh` 的默认路径以本项目仓库根目录为基准：ArduPilot 是
+`../ardupilot`，Gazebo 场景仓库是 `../gz_ws/src/ardupilot_gazebo`。设置 `GZ_REPO_DIR`
+后，参数文件、world、payload bridge 和配置会跟随该目录；也可分别覆盖。
+环境变量中的相对路径同样以本项目仓库根目录为基准，不依赖调用脚本的当前目录。
+SITL 输出固定在 `runtime/sitl/iris-gimbal/`。例如使用其他相邻目录：
+
+```bash
+ARDUPILOT_DIR=../ardupilot GZ_REPO_DIR=../ardupilot_gazebo \
+  GCS_HOST=127.0.0.1 VIDEO_HOST=127.0.0.1 bash scripts/run_iris_gimbal_sitl.sh
+```
+
 ## 配置档案切换
 
 RK3588 实机和 SITL 使用不同的遥测和 YOLO 配置。通过 profile 脚本切换：

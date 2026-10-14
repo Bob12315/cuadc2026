@@ -50,7 +50,7 @@ SITL profile 默认接收 MAVLink UDP 14550，YOLO 视频源为 UDP 5600，模�
 
 ## 3. 启动仿真（用户唯一操作）
 
-确认电脑到 RK3588 网络可达后，在 RK3588 仓库根目录运行：
+确认电脑到 RK3588 网络可达后，在已安装仿真依赖的电脑上，从本项目仓库根目录运行：
 
 ```bash
 GCS_HOST="<RK3588-IP>" VIDEO_HOST="<RK3588-IP>" bash scripts/run_iris_gimbal_sitl.sh
@@ -65,8 +65,11 @@ GCS_HOST="<RK3588-IP>" VIDEO_HOST="<RK3588-IP>" bash scripts/run_iris_gimbal_sit
   `udp:<RK3588-IP>:5600`）。
 
 默认值是队伍现场地址 `10.101.31.108`，必须用环境变量替换。路径类变量
-（`ARDUPILOT_DIR`、`GZ_REPO_DIR`、`GZ_PARAM_FILE`、`GZ_WORLD`）默认指向维护者本机，
-安装位置不同的电脑用同名环境变量覆盖。脚本会自动启用相机流并转发视频，不要再手动运行
+（`ARDUPILOT_DIR`、`GZ_REPO_DIR`）默认是相对本项目仓库根目录的 `../ardupilot` 和
+`../gz_ws/src/ardupilot_gazebo`。参数文件、world、投放 bridge 和配置默认从选定的
+`GZ_REPO_DIR` 派生。所有相对路径覆盖也按本项目仓库根目录解析，与启动时的工作目录无关；
+安装位置不同的电脑可用同名环境变量覆盖。SITL 生成物写入 `runtime/sitl/iris-gimbal/`。
+脚本会自动启用相机流并转发视频，不要再手动运行
 `gz topic ... enable_streaming` 或 GStreamer 转发，以免争用 UDP 5600。
 
 比赛 world、固定相机参数和投放 bridge 来自

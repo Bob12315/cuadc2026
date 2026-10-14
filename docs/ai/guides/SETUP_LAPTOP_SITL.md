@@ -249,7 +249,7 @@ export GZ_SIM_SYSTEM_PLUGIN_PATH="$HOME/gz_ws/src/ardupilot_gazebo/build:${GZ_SI
 export GZ_SIM_RESOURCE_PATH="$HOME/gz_ws/src/ardupilot_gazebo/models:$HOME/gz_ws/src/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH:-}"
 ```
 
-项目启动脚本使用自己的绝对路径变量，但 Gazebo 加载插件和资源仍需要上述两个环境变量。
+项目启动脚本默认按仓库根目录解析相对路径，Gazebo 加载插件和资源仍需要上述两个环境变量。
 新终端会自动读取 `~/.bashrc`；当前 shell 在启动测试前执行 `. ~/.bashrc`。
 
 GStreamer 验证：
@@ -263,7 +263,9 @@ gst-inspect-1.0 x264enc rtph264depay h264parse rtph264pay avdec_h264
 使用 `scripts/run_iris_gimbal_sitl.sh` 验证 Gazebo 与本机 Copter SITL。通过环境变量指定
 实际安装路径，无需修改脚本。脚本当前 `GCS_HOST` 默认是队伍现场地址 `10.101.31.108`，
 `VIDEO_HOST` 默认跟随它；本节安装检查必须显式覆盖为 `127.0.0.1`，避免把数据发往现场设备。
-参数文件和 world 的默认路径也是维护者本机路径，须显式覆盖。确认对应文件存在后运行：
+脚本默认使用仓库旁的 `../ardupilot` 和 `../gz_ws/src/ardupilot_gazebo`；参数文件和 world
+从所选 Gazebo 仓库派生。所有相对路径覆盖按本项目仓库根目录解析。以下示例沿用前文
+安装到用户主目录的布局，显式覆盖外部仓库位置；确认对应文件存在后运行：
 
 ```bash
 cd "<本项目仓库根目录>"
@@ -274,8 +276,6 @@ cd runtime/sitl/install-check
 GCS_HOST=127.0.0.1 VIDEO_HOST=127.0.0.1 \
   ARDUPILOT_DIR="$HOME/ardupilot" \
   GZ_REPO_DIR="$HOME/gz_ws/src/ardupilot_gazebo" \
-  GZ_PARAM_FILE="$HOME/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm" \
-  GZ_WORLD="$HOME/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf" \
   bash "$PROJECT_REPO_ROOT/scripts/run_iris_gimbal_sitl.sh"
 ```
 
@@ -284,10 +284,9 @@ GCS_HOST=127.0.0.1 VIDEO_HOST=127.0.0.1 \
 arm、takeoff、Mission，也不向 RK3588 或任何真实飞控发送数据。验证结束后关闭本次启动的终端。
 payload bridge 或 RTP relay 的单独报错不应掩盖 Gazebo/SITL 的核心启动结果，但应记录在最终报告。
 
-辅助脚本内部会切换到 ArduPilot 源码目录再启动 `sim_vehicle.py`，因此外层 `cd runtime/`
-不能改变它的 SITL 文件输出位置。检查结束后把本次日志和证据整理到项目 `runtime/`；
-需要直接指定 SITL 输出目录时，按新手 SITL 文档的手动方式使用 `--use-dir`，不要为安装
-检查顺手修改辅助脚本的启动逻辑。
+辅助脚本内部会切换到 ArduPilot 源码目录启动 `sim_vehicle.py`，并显式使用
+`--use-dir <本项目仓库>/runtime/sitl/iris-gimbal`。外层 `cd` 不改变该输出位置；
+不会在 ArduPilot 源码目录生成 EEPROM、地形缓存和飞行日志。检查证据也保存到本项目 `runtime/`。
 
 如果插件仓库现有世界、模型或参数文件名与项目文档不同，以实际 commit 为证据报告差异，不要
 伪造缺失文件或随意下载第三方替代物。
