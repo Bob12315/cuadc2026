@@ -53,7 +53,9 @@ class FieldService:
                 "forward_marker_lat": state.get("forward_marker_lat"), "forward_marker_lon": state.get("forward_marker_lon"),
                 "field_heading_yaw_rad": yaw,
                 "field_heading_deg": math.degrees(float(yaw)) if yaw is not None else None,
-                "active_source": "runtime_origin_forward_marker" if active else "none",
+                "active_source": ("runtime_origin_forward_marker" if state.get("heading_source") == "runtime_forward_marker"
+                                  else "runtime_origin_rtk_heading" if state.get("heading_source") == "runtime_rtk_heading"
+                                  else "none") if active else "none",
                 "synced_to_runtime": self._runtime_binding.synced_to_runtime(state, require_frozen=True) if active else False,
                 "profile_id": self._svc.snapshot().profile_id,
                 "runtime_binding": self._runtime_binding.status(),
@@ -86,6 +88,16 @@ class FieldService:
         return {"ok":receipt.accepted,"state":receipt.state,"session_id":receipt.session_id,
                 "session_revision":receipt.session_revision,
                 "error":None if receipt.accepted else receipt.reason_code}
+
+    def start_rtk_heading_sampling(self, *, started_at_s: float) -> dict[str, object]:
+        """Start GPS+yaw sampling using RTK dual-antenna heading."""
+        operation_id = uuid.uuid4().hex
+        receipt = self.calibration.start(CalibrationStart(
+            operation_id, CalibrationMode.RUNTIME_RTK_HEADING,
+            "competition_runtime", started_at_s, self._svc.current_version(), True))
+        return {"ok": receipt.accepted, "state": receipt.state, "session_id": receipt.session_id,
+                "session_revision": receipt.session_revision,
+                "error": None if receipt.accepted else receipt.reason_code}
 
     def observe_runtime_profile_sampling(self, observation: GpsObservation) -> dict[str, object]:
         receipt = self.calibration.observe(observation)

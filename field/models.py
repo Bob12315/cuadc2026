@@ -32,6 +32,7 @@ class HeadingSource(str, Enum):
     """Supported schema-v3 heading source."""
 
     RUNTIME_FORWARD_MARKER = "runtime_forward_marker"
+    RUNTIME_RTK_HEADING = "runtime_rtk_heading"
 
 
 # ---------------------------------------------------------------------------

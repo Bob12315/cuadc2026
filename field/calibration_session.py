@@ -52,6 +52,7 @@ class CalibrationSession:
         self._session_revision = 0
         self._base_version: ReferenceVersion | None = None
         self._auto_commit = True
+        self._heading_mode: str = "forward_marker"
         self._operation_results: dict[str, dict[str, object]] = {}
         self._observation_results: dict[str, dict[str, object]] = {}
 
@@ -67,6 +68,7 @@ class CalibrationSession:
         forward_marker_lon: float | None = None,
         operation_id: str | None = None,
         auto_commit: bool = True,
+        heading_mode: str = "forward_marker",
     ) -> dict[str, object]:
         operation_id = operation_id or uuid.uuid4().hex
         if operation_id in self._operation_results:
@@ -98,8 +100,13 @@ class CalibrationSession:
             return self._failure(
                 "runtime GPS sampling requires schema v3", state=self._state
             )
+        if heading_mode not in ("forward_marker", "rtk"):
+            return self._failure(
+                f"heading_mode must be 'forward_marker' or 'rtk', got {heading_mode!r}",
+                state=self._state,
+            )
         try:
-            sampler = RuntimeFieldBindingSampler(profile)
+            sampler = RuntimeFieldBindingSampler(profile, heading_mode=heading_mode)
             sampling = sampler.start(started_at_s=float(started_at_s))
         except Exception as exc:
             return self._failure(exc, state=self._state)
@@ -109,6 +116,7 @@ class CalibrationSession:
         self._profile_name = profile.name
         self._candidate = None
         self._state = "sampling"
+        self._heading_mode = heading_mode
         self._last_observed_at_s = float(started_at_s)
         self._last_error = None
         self._last_result = None
@@ -127,6 +135,7 @@ class CalibrationSession:
             "ok": True,
             "profile_id": profile.profile_id,
             "state": "sampling",
+            "heading_mode": heading_mode,
             "sampling": _status_dict(sampling),
             "session_id": self._session_id,
             "session_revision": self._session_revision,
@@ -305,6 +314,7 @@ class CalibrationSession:
         self._session_id = None
         self._session_revision = 0
         self._base_version = None
+        self._heading_mode = "forward_marker"
         self._observation_results.clear()
         return {"ok": True, "state": "idle"}
 
@@ -462,11 +472,11 @@ class CalibrationSession:
                 self._last_error = "baseline below minimum"
             return
 
-        # Check baseline policy
+        # Check baseline policy (skip for RTK heading mode — no physical baseline)
         warnings: list[str] = list(candidate.warnings)
         baseline_m = candidate.baseline_m
         profile = self._profile
-        if profile is not None:
+        if profile is not None and self._heading_mode != "rtk":
             min_baseline = profile.binding_policy.min_baseline_m
             if baseline_m < min_baseline and not math.isclose(
                 baseline_m, min_baseline, rel_tol=0.0, abs_tol=1e-6

@@ -39,6 +39,11 @@ class FieldCalibrationTransactionAdapter:
                               input_source="application_typed",
                               forward_marker_lat=command.forward_marker_lat,
                               forward_marker_lon=command.forward_marker_lon)
+            elif command.mode == CalibrationMode.RUNTIME_RTK_HEADING:
+                kwargs = dict(template_profile_id=command.profile_id,
+                              runtime_profile_id="competition_runtime_rtk_session",
+                              input_source="application_typed",
+                              heading_mode="rtk")
             elif profile.extra.get("template_only") is True:
                 return self._receipt(False, command.operation_id, "template_only_profile")
             result = self.session.start(profile, started_at_s=command.started_at_s,
@@ -54,6 +59,8 @@ class FieldCalibrationTransactionAdapter:
             "satellites_visible": observation.satellites_visible, "gps_eph": observation.gps_eph,
             "gps_epv": observation.gps_epv,
             "last_global_position_time": observation.last_global_position_time,
+            "attitude_valid": observation.attitude_valid,
+            "yaw": observation.yaw,
         }, observed_at_s=observation.observed_at_s, observation_id=observation.observation_id,
            expected_session_revision=expected_session_revision)
         return self._from_result(observation.observation_id, result)

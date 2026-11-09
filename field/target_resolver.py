@@ -10,7 +10,7 @@ Readiness requires ALL of:
     is_confirmed == True
     is_frozen == True
     is_ready_for_field_to_gps == True
-    active_source == "runtime_origin_forward_marker"
+    active_source in ("runtime_origin_forward_marker", "runtime_origin_rtk_heading")
     synced_to_runtime == True
     runtime_binding.state == "applied"
     runtime_binding.profile_id is non-empty
@@ -77,9 +77,12 @@ class RuntimeFieldTargetResolver:
         if self._fr.get("is_ready_for_field_to_gps") is not True:
             self._error = "field reference not ready for field→GPS"
             return
-        if self._fr.get("active_source") != "runtime_origin_forward_marker":
+        if self._fr.get("active_source") not in (
+            "runtime_origin_forward_marker", "runtime_origin_rtk_heading"
+        ):
             self._error = (
-                f"active_source must be runtime_origin_forward_marker, "
+                f"active_source must be runtime_origin_forward_marker or "
+                f"runtime_origin_rtk_heading, "
                 f"got {self._fr.get('active_source')!r}"
             )
             return

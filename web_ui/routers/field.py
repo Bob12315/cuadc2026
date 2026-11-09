@@ -66,6 +66,18 @@ def build_router(ctx: WebContext) -> APIRouter:
         ctx.append_field_audit("competition_runtime_sampling_start", result)
         return result
 
+    @router.post("/field-reference/rtk-heading-sampling/start")
+    def rtk_heading_sampling():
+        result = services.rtk_heading_sampling_start()
+        if result.get("ok") is True:
+            ctx.append_field_audit("rtk_heading_sampling_start", result)
+            return result
+        state, error = result.get("state", ""), result.get("error", "unknown error")
+        if state != "idle" or "frozen" in str(error).lower():
+            raise HTTPException(status_code=409, detail=error)
+        ctx.append_field_audit("rtk_heading_sampling_start", result)
+        return result
+
     @router.get("/field-profiles")
     def profiles(): return safe(services.field_profile_list)
 

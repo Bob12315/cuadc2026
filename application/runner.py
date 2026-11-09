@@ -549,6 +549,8 @@ class SystemRunner:
                     gps_eph=self._float_or_none(getattr(snapshot, "gps_eph_m", None)) or -1.0,
                     gps_epv=self._float_or_none(getattr(snapshot, "gps_epv_m", None)) or -1.0,
                     last_global_position_time=self._float_or_none(source_time),
+                    attitude_valid=getattr(snapshot, "yaw_rad", None) is not None,
+                    yaw=self._float_or_none(getattr(snapshot, "yaw_rad", None)),
                 ))
             if result.get("auto_finalized") is True:
                 if result.get("ok") is True:
@@ -584,6 +586,13 @@ class SystemRunner:
             return self.field_service.start_competition_runtime_sampling(
                 forward_marker_lat=forward_marker_lat,
                 forward_marker_lon=forward_marker_lon,
+                started_at_s=time.time(),
+            )
+
+    def rtk_heading_sampling_start(self) -> dict[str, object]:
+        """Start GPS+yaw sampling using RTK dual-antenna heading."""
+        with self.action_runtime_lock:
+            return self.field_service.start_rtk_heading_sampling(
                 started_at_s=time.time(),
             )
 

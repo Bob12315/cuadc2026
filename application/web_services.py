@@ -50,6 +50,7 @@ class WebServices:
     runtime_sampling_finalize: Callable[[], dict[str, Any]]
     runtime_sampling_cancel: Callable[[], dict[str, Any]]
     competition_sampling_start: Callable[[float, float], dict[str, Any]]
+    rtk_heading_sampling_start: Callable[[], dict[str, Any]]
     clear_localization: Callable[[], Any]
     action_specs: tuple[dict[str, Any], ...]
     action_lab_enabled: bool
@@ -77,6 +78,7 @@ class WebServices:
             runtime_sampling_finalize=runner.field_profile_runtime_sampling_finalize,
             runtime_sampling_cancel=runner.field_profile_runtime_sampling_cancel,
             competition_sampling_start=runner.competition_runtime_sampling_start,
+            rtk_heading_sampling_start=runner.rtk_heading_sampling_start,
             clear_localization=runner.clear_localization_result,
             action_specs=tuple(runner.action_lab_specs),
             action_lab_enabled=bool(runner.action_lab_enabled),

@@ -39,6 +39,7 @@ from .geometry import (
     RuntimeFieldGeometryError,
     RuntimeFieldPoint,
     build_runtime_field_geometry,
+    build_runtime_field_geometry_from_heading,
 )
 
 
@@ -144,14 +145,22 @@ class RuntimeFieldBindingSampler:
 
     Builds a binding candidate from a Schema v3 profile and a sequence
     of drone-state snapshots.  All time values are caller-supplied.
+
+    heading_mode:
+        - "forward_marker" (default): heading from profile forward marker A→B
+        - "rtk": heading from median of sampled yaw_rad (RTK dual-antenna)
     """
 
-    def __init__(self, profile: FieldProfile) -> None:
+    def __init__(self, profile: FieldProfile, *, heading_mode: str = "forward_marker") -> None:
         if not isinstance(profile, FieldProfile):
             raise RuntimeFieldBindingError("profile must be a FieldProfile instance")
         if profile.schema_version != 3:
             raise RuntimeFieldBindingError(
                 f"only schema v3 supported, got v{profile.schema_version}"
+            )
+        if heading_mode not in ("forward_marker", "rtk"):
+            raise RuntimeFieldBindingError(
+                f"heading_mode must be 'forward_marker' or 'rtk', got {heading_mode!r}"
             )
         diag = validate_field_profile(profile)
         if not diag.ok:
@@ -162,6 +171,7 @@ class RuntimeFieldBindingSampler:
         self._profile: FieldProfile = profile
         self._gq: GpsQualityThresholds = profile.gps_quality
         self._ros: RuntimeOriginSampling = profile.runtime_origin_sampling
+        self._heading_mode: str = heading_mode
 
         self._state: str = "idle"
         self._started_at_s: Optional[float] = None
@@ -173,6 +183,9 @@ class RuntimeFieldBindingSampler:
         self._seen_source_times: set[float] = set()
         self._max_seen_source_time_s: Optional[float] = None
         self._last_rejection_reason: Optional[str] = None
+
+        # RTK heading mode: collect yaw samples alongside GPS
+        self._yaw_samples: list[float] = []
 
         self._candidate: Optional[RuntimeFieldBindingCandidate] = None
 
@@ -200,6 +213,7 @@ class RuntimeFieldBindingSampler:
         self._seen_source_times = set()
         self._max_seen_source_time_s = None
         self._last_rejection_reason = None
+        self._yaw_samples = []
         self._candidate = None
 
         return self.status(now_s=started_at_s)
@@ -215,6 +229,7 @@ class RuntimeFieldBindingSampler:
         self._seen_source_times = set()
         self._max_seen_source_time_s = None
         self._last_rejection_reason = None
+        self._yaw_samples = []
         self._candidate = None
         return self.status()
 
@@ -489,6 +504,17 @@ class RuntimeFieldBindingSampler:
             epv=float(epv),
         )
         self._accepted.append(sample)
+
+        # RTK heading mode: also collect yaw from attitude
+        if self._heading_mode == "rtk":
+            yaw = snapshot.get("yaw")
+            attitude_valid = snapshot.get("attitude_valid", False)
+            if (
+                attitude_valid
+                and _is_finite_number(yaw)
+            ):
+                self._yaw_samples.append(float(yaw))
+
         # Do NOT clear last_rejection_reason
         return self.status(now_s=observed_at_s)
 
@@ -555,14 +581,35 @@ class RuntimeFieldBindingSampler:
             )
 
         # Build runtime geometry
-        try:
-            geometry = build_runtime_field_geometry(
-                self._profile,
-                origin_lat=origin_lat,
-                origin_lon=origin_lon,
-            )
-        except RuntimeFieldGeometryError as exc:
-            raise RuntimeFieldBindingError(str(exc)) from exc
+        if self._heading_mode == "rtk":
+            # RTK dual-antenna: use circular median of collected yaw samples
+            if not self._yaw_samples:
+                raise RuntimeFieldBindingError(
+                    "RTK heading mode requires at least one valid yaw sample"
+                )
+            heading_rad = _circular_median_yaw(self._yaw_samples)
+            try:
+                geometry = build_runtime_field_geometry_from_heading(
+                    self._profile,
+                    origin_lat=origin_lat,
+                    origin_lon=origin_lon,
+                    heading_rad=heading_rad,
+                )
+            except RuntimeFieldGeometryError as exc:
+                raise RuntimeFieldBindingError(str(exc)) from exc
+            heading_source = HeadingSource.RUNTIME_RTK_HEADING.value
+            field_reference_mode = "runtime_origin_rtk_heading"
+        else:
+            try:
+                geometry = build_runtime_field_geometry(
+                    self._profile,
+                    origin_lat=origin_lat,
+                    origin_lon=origin_lon,
+                )
+            except RuntimeFieldGeometryError as exc:
+                raise RuntimeFieldBindingError(str(exc)) from exc
+            heading_source = HeadingSource.RUNTIME_FORWARD_MARKER.value
+            field_reference_mode = "runtime_origin_forward_marker"
 
         # Conservative GPS quality
         gps_fix_type = min(s.fix_type for s in self._accepted)
@@ -573,8 +620,8 @@ class RuntimeFieldBindingSampler:
         return RuntimeFieldBindingCandidate(
             profile_id=self._profile.profile_id,
             origin_source=OriginSource.RUNTIME_CURRENT_GPS.value,
-            heading_source=HeadingSource.RUNTIME_FORWARD_MARKER.value,
-            field_reference_mode="runtime_origin_forward_marker",
+            heading_source=heading_source,
+            field_reference_mode=field_reference_mode,
             origin_lat=origin_lat,
             origin_lon=origin_lon,
             forward_marker_lat=geometry.forward_marker_lat,
@@ -671,10 +718,22 @@ def _validate_candidate(c: RuntimeFieldBindingCandidate) -> list[str]:
             errs.append(f"{name} must be a non-empty string, got {value!r}")
     if c.origin_source != OriginSource.RUNTIME_CURRENT_GPS.value:
         errs.append("origin_source must be 'runtime_current_gps'")
-    if c.heading_source != HeadingSource.RUNTIME_FORWARD_MARKER.value:
-        errs.append("heading_source must be 'runtime_forward_marker'")
-    if c.field_reference_mode != "runtime_origin_forward_marker":
-        errs.append("field_reference_mode must be 'runtime_origin_forward_marker'")
+    # RTK heading mode carries no physical A→B baseline: the forward marker is
+    # synthetic and heading comes from the median of sampled dual-antenna yaw.
+    is_rtk = c.heading_source == HeadingSource.RUNTIME_RTK_HEADING.value
+    if c.heading_source not in (
+        HeadingSource.RUNTIME_FORWARD_MARKER.value,
+        HeadingSource.RUNTIME_RTK_HEADING.value,
+    ):
+        errs.append(
+            "heading_source must be 'runtime_forward_marker' or 'runtime_rtk_heading'"
+        )
+    expected_mode = (
+        "runtime_origin_rtk_heading" if is_rtk
+        else "runtime_origin_forward_marker"
+    )
+    if c.field_reference_mode != expected_mode:
+        errs.append(f"field_reference_mode must be {expected_mode!r}")
 
     origin = _validate_wgs84_pair(errs, "candidate.origin", c.origin_lat, c.origin_lon)
     marker = _validate_wgs84_pair(
@@ -694,13 +753,22 @@ def _validate_candidate(c: RuntimeFieldBindingCandidate) -> list[str]:
         value = getattr(c, name)
         if not _is_finite_number(value):
             errs.append(f"{name} must be finite, got {value!r}")
-    if _is_finite_number(c.baseline_m) and float(c.baseline_m) <= 0.0:
-        errs.append(f"baseline_m must be > 0, got {c.baseline_m!r}")
+    if _is_finite_number(c.baseline_m):
+        if is_rtk:
+            if float(c.baseline_m) != 0.0:
+                errs.append(
+                    f"baseline_m must be 0.0 in RTK heading mode, got {c.baseline_m!r}"
+                )
+        elif float(c.baseline_m) <= 0.0:
+            errs.append(f"baseline_m must be > 0, got {c.baseline_m!r}")
     if _is_finite_number(c.field_heading_yaw_rad):
         normalized = FieldReference._normalize_yaw(float(c.field_heading_yaw_rad))
         if not _close(c.field_heading_yaw_rad, normalized, 1e-12):
             errs.append("field_heading_yaw_rad must be normalized")
-    if recomputed is not None:
+    # The synthetic-marker A→B recomputation is an independent check only for
+    # forward_marker mode.  In RTK mode heading comes from sampled yaw, so the
+    # geometry is cross-checked against the candidate heading in _validate_geometry.
+    if recomputed is not None and not is_rtk:
         _check_close(errs, "candidate.baseline_m", c.baseline_m, recomputed[0])
         _check_close(errs, "candidate.field_heading_yaw_rad", c.field_heading_yaw_rad, recomputed[1])
         _check_close(errs, "candidate.field_heading_deg", c.field_heading_deg, recomputed[2])
@@ -761,6 +829,7 @@ def _validate_geometry(
     marker: tuple[float, float] | None,
     recomputed: tuple[float, float, float] | None,
 ) -> None:
+    is_rtk = c.heading_source == HeadingSource.RUNTIME_RTK_HEADING.value
     if not isinstance(g.profile_id, str) or not g.profile_id.strip():
         errs.append("geometry.profile_id must be a non-empty string")
     elif g.profile_id != c.profile_id:
@@ -776,7 +845,12 @@ def _validate_geometry(
     for name in ("field_heading_yaw_rad", "field_heading_deg", "baseline_m"):
         if not _is_finite_number(getattr(g, name)):
             errs.append(f"geometry.{name} must be finite")
-    if recomputed is not None:
+    if is_rtk:
+        if _is_finite_number(g.baseline_m) and float(g.baseline_m) != 0.0:
+            errs.append(
+                f"geometry.baseline_m must be 0.0 in RTK heading mode, got {g.baseline_m!r}"
+            )
+    elif recomputed is not None:
         _check_close(errs, "geometry.baseline_m", g.baseline_m, recomputed[0])
         _check_close(errs, "geometry.field_heading_yaw_rad", g.field_heading_yaw_rad, recomputed[1])
         _check_close(errs, "geometry.field_heading_deg", g.field_heading_deg, recomputed[2])
@@ -792,7 +866,7 @@ def _validate_geometry(
     if fwd_ok:
         _check_close(errs, "geometry.forward_marker.field_x_m", g.forward_marker.field_x_m, 0.0)
         _check_close(errs, "geometry.forward_marker.altitude_m", g.forward_marker.altitude_m, 0.0)
-        if recomputed is not None:
+        if recomputed is not None and not is_rtk:
             _check_close(errs, "geometry.forward_marker.field_y_m", g.forward_marker.field_y_m, recomputed[0])
         if marker is not None:
             _check_gps(errs, "geometry.forward_marker", (g.forward_marker.lat, g.forward_marker.lon), marker)
@@ -826,7 +900,13 @@ def _validate_geometry(
                 g.recce_area_corners[index].field_x_m,
             )
 
-    if origin is not None and recomputed is not None:
+    # In RTK mode there is no independent A→B heading, so reproject using the
+    # candidate's own (yaw-derived) heading to verify geometry consistency.
+    reproj_heading = (
+        c.field_heading_yaw_rad if is_rtk
+        else (recomputed[1] if recomputed is not None else None)
+    )
+    if origin is not None and reproj_heading is not None:
         points: list[tuple[str, RuntimeFieldPoint]] = []
         if home_ok:
             points.append(("geometry.home", g.home))
@@ -848,7 +928,7 @@ def _validate_geometry(
                     point.altitude_m,
                     origin_lat=origin[0],
                     origin_lon=origin[1],
-                    field_heading_yaw_rad=recomputed[1],
+                    field_heading_yaw_rad=reproj_heading,
                 )
                 _check_gps(errs, f"{path} reprojection", (point.lat, point.lon), (projected.lat, projected.lon))
             except Exception as exc:
@@ -990,3 +1070,25 @@ def _is_finite_number(value: Any) -> bool:
 
 def _is_strict_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _circular_median_yaw(yaw_samples: list[float]) -> float:
+    """Compute circular median of yaw angles (radians, range (-pi, pi]).
+
+    Handles wrap-around correctly by computing deltas relative to the
+    first sample, taking the linear median of those deltas, then
+    converting back.
+    """
+    if not yaw_samples:
+        raise RuntimeFieldBindingError("yaw_samples must not be empty")
+    reference = yaw_samples[0]
+    deltas: list[float] = []
+    for yaw in yaw_samples:
+        delta = math.atan2(
+            math.sin(yaw - reference), math.cos(yaw - reference)
+        )
+        deltas.append(delta)
+    median_delta = statistics.median(deltas)
+    result = reference + median_delta
+    # Normalize to (-pi, pi]
+    return math.atan2(math.sin(result), math.cos(result))

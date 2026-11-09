@@ -56,6 +56,7 @@ def _services(runner):
         runtime_sampling_finalize=unavailable,
         runtime_sampling_cancel=unavailable,
         competition_sampling_start=unavailable,
+        rtk_heading_sampling_start=unavailable,
         clear_localization=unavailable,
         action_specs=(),
         action_lab_enabled=False,

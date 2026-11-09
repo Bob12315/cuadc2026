@@ -92,11 +92,15 @@ class GpsObservation:
     # Source timestamp from GLOBAL_POSITION_INT.  This is distinct from the
     # local observation time and lets calibration reject stale GPS samples.
     last_global_position_time: float | None = None
+    # Attitude fields for RTK heading mode
+    attitude_valid: bool = False
+    yaw: float | None = None
 
 
 class CalibrationMode(str, Enum):
     REGISTERED_PROFILE = "registered_profile"
     RUNTIME_FORWARD_MARKER = "runtime_forward_marker"
+    RUNTIME_RTK_HEADING = "runtime_rtk_heading"
 
 
 @dataclass(frozen=True, slots=True)

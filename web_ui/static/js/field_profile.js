@@ -98,10 +98,12 @@ window.UavFieldProfiles = (function () {
         var busy = requestBusy;
         var inputOk = isInputValid();
         var sBtn = $("cfsStart");
+        var rtkBtn = $("cfsStartRtk");
         var cBtn = $("cfsCancel"), rBtn = $("cfsReset");
 
         function disableAll() {
             if (sBtn) sBtn.disabled = true;
+            if (rtkBtn) rtkBtn.disabled = true;
             if (cBtn) cBtn.disabled = true;
             if (rBtn) rBtn.disabled = true;
         }
@@ -124,6 +126,7 @@ window.UavFieldProfiles = (function () {
         if (rs.state === "idle") {
             disableAll();
             if (sBtn && inputOk && !rs.isFrozen) sBtn.disabled = false;
+            if (rtkBtn && !rs.isFrozen) rtkBtn.disabled = false;
             if (rBtn) rBtn.disabled = false;
             return;
         }
@@ -303,6 +306,15 @@ window.UavFieldProfiles = (function () {
         );
     }
 
+    function onStartRtk() {
+        _doPost(
+            "/api/field-reference/rtk-heading-sampling/start",
+            "将使用 RTK 双天线航向作为场地 +Y 方向。\n请确保飞机机头对准场地前方，然后开始采样。\n采样通过后会自动确认并冻结。\n该操作不会启动 Mission，不会发送飞控命令。",
+            "{}",
+            null
+        );
+    }
+
     function onCancel() {
         _doPost(
             "/api/field-reference/runtime-sampling/cancel",
@@ -345,6 +357,7 @@ window.UavFieldProfiles = (function () {
         initCalled = true;
         // Wire competition buttons
         var sb = $("cfsStart"); if (sb) sb.addEventListener("click", onStart);
+        var rtkb = $("cfsStartRtk"); if (rtkb) rtkb.addEventListener("click", onStartRtk);
         var cb = $("cfsCancel"); if (cb) cb.addEventListener("click", onCancel);
         var rb = $("cfsReset"); if (rb) rb.addEventListener("click", onReset);
 
